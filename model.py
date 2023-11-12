@@ -115,6 +115,18 @@ class ResNetPoly(nn.Module):
         out = self.linear(out)
         torch.save(out, f"{save_dir}/linear.pt")
         return out
+
+    def train_fz_bn(self, freeze_bn=True, freeze_bn_affine=True, mode=True):
+        """
+            Override the default train() to freeze the BN parameters
+        """
+        self.train(mode)
+        for m in self.modules():
+            if isinstance(m, nn.BatchNorm2d):
+                m.eval()
+                if (freeze_bn_affine and m.affine == True):
+                    m.weight.requires_grad = not freeze_bn
+                    m.bias.requires_grad = not freeze_bn
         
 
     def forward(self, x, mask):
@@ -213,6 +225,38 @@ class ResNetPoly(nn.Module):
         out = self.linear(out)
 
         return out
+    
+    def forward_with_fm(self, x, mask):
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu1(out, mask)
+        out = self.maxpool1(out)
+        out = self.layer1_0(out, mask)
+        out = self.layer1_1(out, mask)
+        #export
+        fm1 = out
+        
+        out = self.layer2_0(out, mask)
+        out = self.layer2_1(out, mask)
+        #export
+        fm2 = out
+
+        out = self.layer3_0(out, mask)
+        out = self.layer3_1(out, mask)
+        #export
+        fm3 = out
+
+        out = self.layer4_0(out, mask)
+        out = self.layer4_1(out, mask)
+        #export
+        fm4 = out
+
+        out = F.adaptive_avg_pool2d(out, (1,1))
+        out = out.view(out.size(0), -1)
+        out = self.linear(out)
+
+        return out, fm1, fm2, fm3, fm4
 
 def ResNet18Poly():
     return ResNetPoly(BasicBlockPoly, [2, 2, 2, 2], 1000)
