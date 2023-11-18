@@ -13,6 +13,7 @@ import ast
 import torch.nn.init as init
 from tqdm import tqdm
 from model import ResNet18Poly
+import numpy as np
 
 from datetime import datetime
 from utils import *
@@ -150,6 +151,7 @@ def main(args):
         train_acc = (top1_total / total).item()
         print('Epoch', epoch, 'Training Acc:', train_acc)
         writer.add_scalar('Accuracy/train', train_acc, epoch)
+        writer.add_scalar('Loss/train', train_loss/total, epoch)
             
     def test(model, epoch, best_acc, mask):
         model.eval()
@@ -190,7 +192,6 @@ def main(args):
 
     pretrain_model = torchvision.models.resnet18(pretrained=True)
 
-    # 将模型1的参数复制到模型2
     def copy_parameters(model1, model2):
         for name1 in model1.state_dict():
             param1 = model1.state_dict()[name1]
@@ -221,7 +222,7 @@ def main(args):
     print("gpu count =", torch.cuda.device_count())
     if torch.cuda.device_count() > 1:
         model = torch.nn.DataParallel(model)
-        # pretrain_model = torch.nn.DataParallel(pretrain_model)
+        pretrain_model = torch.nn.DataParallel(pretrain_model)
 
     pretrain_model = pretrain_model.cuda()
     model = model.cuda()
@@ -233,12 +234,24 @@ def main(args):
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=t_max)
 
+    mask_x = np.linspace(0, np.pi / 2, 80)[1:]
+    mask_y = 1 - np.sin(mask_x)
+
     for epoch in range(start_epoch, start_epoch + t_max):
         # mask = torch.tensor(1 - epoch / (start_epoch + t_max), dtype=torch.float).cuda()
-        mask = 1 - ((epoch + 1) / (start_epoch + 80))
+        # mask = 1 - ((epoch + 1) / (start_epoch + 80))
+
+        if epoch <= 78:
+            mask = mask_y[epoch]
+        else:
+            mask = 0
+
         # mask = 0
         if mask < 0:
             mask = 0
+
+        print("mask = ", mask)
+        writer.add_scalar('Mask value', mask, epoch)
         train(model, pretrain_model, optimizer, epoch, mask)
         # scheduler.step()
         best_acc = test(model, epoch, best_acc, mask)
