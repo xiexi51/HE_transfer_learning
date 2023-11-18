@@ -5,14 +5,36 @@ import torch.nn.functional as F
 class relu_poly(nn.Module):
     def __init__(self, factor1 = 0.01, factor2 = 1, factor3 = 0.01):
         super(relu_poly, self).__init__()
-        self.weight = torch.nn.Parameter(torch.FloatTensor([0.00, 1]), requires_grad=True)
-        self.bias= torch.nn.Parameter(torch.FloatTensor([0]), requires_grad=True)
+        self.weight = torch.nn.Parameter(torch.FloatTensor([0.00, 1, 0.00]), requires_grad=True)
         self.factor1 = factor1
         self.factor2 = factor2
         self.factor3 = factor3
 
     def forward(self, input, mask):
-        y = self.weight[0]*torch.mul(input, input)*self.factor1 + self.weight[1]*input*self.factor2 + self.bias*self.factor3
+        y = self.weight[0]*torch.mul(input, input)*self.factor1 + self.weight[1]*input*self.factor2 + self.weight[2]*self.factor3
+        y = F.relu(input) * mask + y * (1 - mask)
+        return y
+
+class channelwise_relu_poly(nn.Module):
+    def __init__(self, num_channels, factor1=0.1, factor2=1, factor3=0.1):
+        super(channelwise_relu_poly, self).__init__()
+        initial_weights = torch.zeros(num_channels, 3)
+        initial_weights[:, 1] = 1  
+        self.weight = nn.Parameter(initial_weights, requires_grad=True)
+        self.factor1 = factor1
+        self.factor2 = factor2
+        self.factor3 = factor3
+        self.num_channels = num_channels
+
+    def forward(self, input, mask):
+        weights = self.weight.unsqueeze(-1).unsqueeze(-1)
+        weights = weights.expand(-1, -1, input.size(2), input.size(3))
+
+        square_term = weights[:, 0, :, :] * torch.mul(input, input) * self.factor1
+        linear_term = weights[:, 1, :, :] * input * self.factor2
+        constant_term = weights[:, 2, :, :] * self.factor3
+
+        y = square_term + linear_term + constant_term
         y = F.relu(input) * mask + y * (1 - mask)
         return y
 
@@ -36,8 +58,8 @@ class BasicBlockPoly(nn.Module):
                 nn.BatchNorm2d(self.expansion*planes)
             )
         
-        self.relu1 = relu_poly()
-        self.relu2 = relu_poly()
+        self.relu1 = channelwise_relu_poly(planes)
+        self.relu2 = channelwise_relu_poly(planes)
 
     def forward(self, x, mask):
         out = self.relu1(self.bn1(self.conv1(x)), mask)
@@ -63,7 +85,7 @@ class ResNetPoly(nn.Module):
 
         self.linear = nn.Linear(512*block.expansion, num_classes)
 
-        self.relu1 = relu_poly()
+        self.relu1 = channelwise_relu_poly(64)
 
     def _create_blocks(self, block, planes, num_blocks, stride):
         strides = [stride] + [1]*(num_blocks-1)
@@ -72,6 +94,25 @@ class ResNetPoly(nn.Module):
             blocks.append(block(self.in_planes, planes, stride))
             self.in_planes = planes * block.expansion
         return blocks
+
+    def forward(self, x, mask):
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu1(out, mask)
+        out = self.maxpool1(out)
+        out = self.layer1_0(out, mask)
+        out = self.layer1_1(out, mask)
+        out = self.layer2_0(out, mask)
+        out = self.layer2_1(out, mask)
+        out = self.layer3_0(out, mask)
+        out = self.layer3_1(out, mask)
+        out = self.layer4_0(out, mask)
+        out = self.layer4_1(out, mask)
+        out = F.adaptive_avg_pool2d(out, (1,1))
+        out = out.view(out.size(0), -1)
+        out = self.linear(out)
+
+        return out
 
     def forward_save(self, x, mask, save_dir):
         torch.save(x, f"{save_dir}/x_before_conv1.pt")
@@ -115,116 +156,6 @@ class ResNetPoly(nn.Module):
         out = self.linear(out)
         torch.save(out, f"{save_dir}/linear.pt")
         return out
-
-    def train_fz_bn(self, freeze_bn=True, freeze_bn_affine=True, mode=True):
-        """
-            Override the default train() to freeze the BN parameters
-        """
-        self.train(mode)
-        for m in self.modules():
-            if isinstance(m, nn.BatchNorm2d):
-                m.eval()
-                if (freeze_bn_affine and m.affine == True):
-                    m.weight.requires_grad = not freeze_bn
-                    m.bias.requires_grad = not freeze_bn
-        
-
-    def forward(self, x, mask):
-        # print()
-        # print()
-        # print(x.view(-1)[:10])
-        # torch.save(x, "x_before_conv1.pt")
-        # print("conv1 weights:", self.conv1.weight.view(-1)[:10])
-
-        # torch.save(self.conv1.weight, "conv1_weight.pt")
-
-        # out = self.conv1(x)
-
-        # torch.save(out, "x_after_conv1.pt")
-
-        # print("conv1 activation:", out.view(-1)[:10])
-
-        # print("bn1 weights:", self.bn1.weight.view(-1)[:10])
-        # out = self.bn1(out)
-        # print("bn1 activation:", out.view(-1)[:10])
-
-        # out = self.relu1(out, mask)
-        # out = self.maxpool1(out)
-
-        # out = self.layer1_0(out, mask)
-        # out = self.layer1_1(out, mask)
-
-        # out = self.layer2_0(out, mask)
-        # out = self.layer2_1(out, mask)
-
-        # out = self.layer3_0(out, mask)
-        # out = self.layer3_1(out, mask)
-
-        # out = self.layer4_0(out, mask)
-        # out = self.layer4_1(out, mask)
-
-        # out = F.avg_pool2d(out, 4)
-        # out = out.view(out.size(0), -1)
-        # out = self.linear(out)
-
-        # torch.save(x, "x_before_conv1.pt")
-        # torch.save(self.conv1.weight, "conv1_weight.pt")
-
-        # out = self.conv1(x)
-        # torch.save(out, "x_after_conv1.pt")
-
-        # out = self.bn1(out)
-        # torch.save(out, "bn1_activation.pt")
-
-        # out = self.relu1(out, mask)
-        # torch.save(out, "relu1.pt")
-        # out = self.maxpool1(out)
-        # torch.save(out, "maxpool1.pt")
-
-        # out = self.layer1_0(out, mask)
-        # torch.save(out, "layer1_0.pt")
-        # out = self.layer1_1(out, mask)
-        # torch.save(out, "layer1_1.pt")
-
-        # out = self.layer2_0(out, mask)
-        # torch.save(out, "layer2_0.pt")
-        # out = self.layer2_1(out, mask)
-        # torch.save(out, "layer2_1.pt")
-
-        # out = self.layer3_0(out, mask)
-        # torch.save(out, "layer3_0.pt")
-        # out = self.layer3_1(out, mask)
-        # torch.save(out, "layer3_1.pt")
-
-        # out = self.layer4_0(out, mask)
-        # torch.save(out, "layer4_0.pt")
-        # out = self.layer4_1(out, mask)
-        # torch.save(out, "layer4_1.pt")
-
-        # out = F.adaptive_avg_pool2d(out, (1,1))
-        # torch.save(out, "avg_pool2d.pt")
-        # out = out.view(out.size(0), -1)
-        # torch.save(out, "out_view.pt")
-        # out = self.linear(out)
-        # torch.save(out, "linear.pt")
-
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu1(out, mask)
-        out = self.maxpool1(out)
-        out = self.layer1_0(out, mask)
-        out = self.layer1_1(out, mask)
-        out = self.layer2_0(out, mask)
-        out = self.layer2_1(out, mask)
-        out = self.layer3_0(out, mask)
-        out = self.layer3_1(out, mask)
-        out = self.layer4_0(out, mask)
-        out = self.layer4_1(out, mask)
-        out = F.adaptive_avg_pool2d(out, (1,1))
-        out = out.view(out.size(0), -1)
-        out = self.linear(out)
-
-        return out
     
     def forward_with_fm(self, x, mask):
 
@@ -257,6 +188,18 @@ class ResNetPoly(nn.Module):
         out = self.linear(out)
 
         return out, fm1, fm2, fm3, fm4
+
+    def train_fz_bn(self, freeze_bn=True, freeze_bn_affine=True, mode=True):
+        """
+            Override the default train() to freeze the BN parameters
+        """
+        self.train(mode)
+        for m in self.modules():
+            if isinstance(m, nn.BatchNorm2d):
+                m.eval()
+                if (freeze_bn_affine and m.affine == True):
+                    m.weight.requires_grad = not freeze_bn
+                    m.bias.requires_grad = not freeze_bn
 
 def ResNet18Poly():
     return ResNetPoly(BasicBlockPoly, [2, 2, 2, 2], 1000)

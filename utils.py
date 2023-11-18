@@ -2,6 +2,7 @@ import torch
 from torch.optim.optimizer import Optimizer
 from collections import defaultdict
 from torch.nn import functional as F
+import torch.nn as nn
 
 def print_available_gpus():
     num_devices = torch.cuda.device_count()
@@ -69,3 +70,18 @@ def at(x):
 
 def at_loss(x, y):
     return (at(x) - at(y)).pow(2).mean()
+
+class SoftTarget(nn.Module):
+	'''
+	Distilling the Knowledge in a Neural Network
+	https://arxiv.org/pdf/1503.02531.pdf
+	'''
+	def __init__(self, T):
+		super(SoftTarget, self).__init__()
+		self.T = T
+
+	def forward(self, out_s, out_t):
+		loss = F.kl_div(F.log_softmax(out_s/self.T, dim=1),
+						F.softmax(out_t/self.T, dim=1),
+						reduction='batchmean') * self.T * self.T
+		return loss

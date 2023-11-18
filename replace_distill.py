@@ -12,8 +12,10 @@ import time
 import ast
 import torch.nn.init as init
 from tqdm import tqdm
-from model import ResNet18Poly
+from model import ResNet18Poly, channelwise_relu_poly
 import numpy as np
+import shutil
+import sys
 
 from datetime import datetime
 from utils import *
@@ -70,12 +72,10 @@ def main(args):
     testloader = torch.utils.data.DataLoader(
         testset, batch_size = args.batch_size_test, shuffle=False, num_workers=args.num_workers)
 
-    criterion = nn.CrossEntropyLoss()
-
+    current_datetime = datetime.now().strftime('%Y%m%d%H%M%S')
     if args.log_root:
         log_root = args.log_root
     else:
-        current_datetime = datetime.now().strftime('%Y%m%d%H%M%S')
         log_root = 'runs' + current_datetime
 
     log_dir = f"{log_root}/{args.id}_ep{args.epoch}_lr{args.lr}_wd{args.w_decay}_opt{args.optim}"\
@@ -83,6 +83,13 @@ def main(args):
             f"_b1{args.add_bias1}_b2{args.add_bias2}_re{args.add_relu}_unfreeze{args.unfreeze_mode}_aug{args.data_augment}"
     
     print("log_dir = ", log_dir)
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    current_file_name = os.path.basename(sys.argv[0])
+    new_file_name = current_file_name.replace(".py", f"_{current_datetime}.py")
+    shutil.copyfile(current_file_name, os.path.join(log_dir, new_file_name))
+    print(f"File '{current_file_name}' has been copied to '{log_dir}' as '{new_file_name}'")
+
 
     writer = SummaryWriter(log_dir=log_dir)
 
@@ -112,9 +119,13 @@ def main(args):
         # model_t.train()
 
         train_loss = 0
+        train_loss_kd = 0
+        train_loss_ce = 0
+        train_loss_fm = 0
+
         # correct = 0
         if args.pbar:
-            pbar = tqdm(trainloader, total=len(trainloader), desc=f"Epo {epoch} Training Lr {optimizer.param_groups[0]['lr']:.1e}", ncols=100)
+            pbar = tqdm(trainloader, total=len(trainloader), desc=f"Epo {epoch} Lr {optimizer.param_groups[0]['lr']:.1e}", ncols=120)
         else:
             pbar = trainloader
 
@@ -124,6 +135,9 @@ def main(args):
         loss_fun = nn.MSELoss()
         # loss_fun = at_loss
 
+        criterion_kd = SoftTarget(4.0).cuda()
+        criterion_ce = nn.CrossEntropyLoss()
+
         for x, y in pbar:
             x, y = x.cuda(), y.cuda()
 
@@ -131,27 +145,41 @@ def main(args):
             with torch.no_grad():
                 out_t, fm1_t, fm2_t, fm3_t, fm4_t = model_t(x)
             out_s, fm1_s, fm2_s, fm3_s, fm4_s = model_s.forward_with_fm(x, mask)
-            loss = 0
-            loss += loss_fun(fm1_t, fm1_s)*500
-            loss += loss_fun(fm2_t, fm2_s)*500
-            loss += loss_fun(fm3_t, fm3_s)*500
-            loss += loss_fun(fm4_t, fm4_s)*500
+            loss_fm = 0
+            loss_fm += loss_fun(fm1_t, fm1_s)*500
+            loss_fm += loss_fun(fm2_t, fm2_s)*500
+            loss_fm += loss_fun(fm3_t, fm3_s)*500
+            loss_fm += loss_fun(fm4_t, fm4_s)*500
+
+            kd_loss = criterion_kd(out_s, out_t) *100
+            ce_loss = criterion_ce(out_s, y) *100
+
+            loss = kd_loss + ce_loss + loss_fm
+            # loss = loss_fm
             
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
+            train_loss_fm += loss_fm.item()
+            train_loss_kd += kd_loss.item()
+            train_loss_ce += ce_loss.item()
+
+
             # correct += torch.argmax(fx, 1).eq(y).float().sum().item()
 
             top1, top5 = accuracy(out_s, y, topk=(1, 5))
             top1_total += top1[0] * x.size(0)
             top5_total += top5[0] * x.size(0)
             total += x.size(0)
-            pbar.set_postfix_str(f"Loss{train_loss/total:.2f}, 1a {100*top1_total/total:.2f}, 5a {100*top5_total/total:.2f}")
+            pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e}, 1a {100*top1_total/total:.1f}, 5a {100*top5_total/total:.1f}")
 
         train_acc = (top1_total / total).item()
         print('Epoch', epoch, 'Training Acc:', train_acc)
         writer.add_scalar('Accuracy/train', train_acc, epoch)
         writer.add_scalar('Loss/train', train_loss/total, epoch)
+        writer.add_scalar('Loss_fm/train', train_loss_fm/total, epoch)
+        writer.add_scalar('Loss_kd/train', train_loss_kd/total, epoch)
+        writer.add_scalar('Loss_ce/train', train_loss_ce/total, epoch)
             
     def test(model, epoch, best_acc, mask):
         model.eval()
@@ -218,7 +246,7 @@ def main(args):
     # test(pretrain_model.cuda(), 0, tmp_test_acc, None)
     # tmp_test_acc = 0
     # test(model.cuda(), 0, tmp_test_acc, 1)
-
+    
     print("gpu count =", torch.cuda.device_count())
     if torch.cuda.device_count() > 1:
         model = torch.nn.DataParallel(model)
@@ -227,15 +255,34 @@ def main(args):
     pretrain_model = pretrain_model.cuda()
     model = model.cuda()
     model.eval()
-    
-    optimizer = optim.AdamW(model.parameters(), lr = args.lr, weight_decay=args.w_decay)
 
-    # optimizer = Lookahead(optimizer)
+    base_learning_rate = args.lr
+    param_groups = []
+    processed_params = set()
+    for module in model.modules():
+        if isinstance(module, channelwise_relu_poly):
+            adjusted_learning_rate = base_learning_rate * module.num_channels
+            param_groups.append({'params': list(module.parameters()), 'lr': adjusted_learning_rate})
+            processed_params.update(module.parameters())
+        else:
+            pass
+    for param in model.parameters():
+        if param not in processed_params:
+            param_groups.append({'params': param, 'lr': base_learning_rate})
+    
+    # optimizer = optim.AdamW(param_groups)
+    # optimizer = optim.AdamW(model.parameters(), lr = args.lr, weight_decay=args.w_decay)
+    optimizer = optim.AdamW(model.parameters(), lr = args.lr)
+
+    optimizer = Lookahead(optimizer)
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=t_max)
 
     mask_x = np.linspace(0, np.pi / 2, 80)[1:]
     mask_y = 1 - np.sin(mask_x)
+
+    # mask_x = np.linspace(0, 80, 80)[1:]
+    # mask_y = np.exp(-mask_x/10)
 
     for epoch in range(start_epoch, start_epoch + t_max):
         # mask = torch.tensor(1 - epoch / (start_epoch + t_max), dtype=torch.float).cuda()
@@ -249,6 +296,8 @@ def main(args):
         # mask = 0
         if mask < 0:
             mask = 0
+
+        # mask = 0
 
         print("mask = ", mask)
         writer.add_scalar('Mask value', mask, epoch)
