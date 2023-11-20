@@ -12,8 +12,11 @@ import time
 import ast
 import torch.nn.init as init
 from tqdm import tqdm
-from model import ResNet18Poly
+from model import ResNet18Poly, relu_poly
+from model_relu import ResNet18Relu
 import numpy as np
+import shutil
+import sys
 
 from datetime import datetime
 from utils import *
@@ -34,7 +37,7 @@ parser.add_argument('--add_bias2', type=ast.literal_eval, default=False)
 parser.add_argument('--add_relu', type=ast.literal_eval, default=False)
 parser.add_argument('--unfreeze_mode', type=str, default='none', choices=['none', 'b2_conv2', 'b2'])
 parser.add_argument('--data_augment', type=ast.literal_eval, default=False)
-parser.add_argument('--num_workers', type=int, default=4)
+parser.add_argument('--num_workers', type=int, default=20)
 parser.add_argument('--pbar', type=ast.literal_eval, default=True)
 parser.add_argument('--log_root', type=str)
 args = parser.parse_args()
@@ -72,10 +75,10 @@ def main(args):
 
     criterion = nn.CrossEntropyLoss()
 
+    current_datetime = datetime.now().strftime('%Y%m%d%H%M%S')
     if args.log_root:
         log_root = args.log_root
     else:
-        current_datetime = datetime.now().strftime('%Y%m%d%H%M%S')
         log_root = 'runs' + current_datetime
 
     log_dir = f"{log_root}/{args.id}_ep{args.epoch}_lr{args.lr}_wd{args.w_decay}_opt{args.optim}"\
@@ -83,6 +86,12 @@ def main(args):
             f"_b1{args.add_bias1}_b2{args.add_bias2}_re{args.add_relu}_unfreeze{args.unfreeze_mode}_aug{args.data_augment}"
     
     print("log_dir = ", log_dir)
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    current_file_name = os.path.basename(sys.argv[0])
+    new_file_name = current_file_name.replace(".py", f"_{current_datetime}.py")
+    shutil.copyfile(current_file_name, os.path.join(log_dir, new_file_name))
+    print(f"File '{current_file_name}' has been copied to '{log_dir}' as '{new_file_name}'")
 
     writer = SummaryWriter(log_dir=log_dir)
 
@@ -104,6 +113,16 @@ def main(args):
                 correct_k = correct[:k].flatten().float().sum(0, keepdim=True)
                 res.append(correct_k.mul_(1.0 / batch_size))
             return res
+        
+    def custom_mse_loss(x, y):
+        """
+        Compute the mean squared error loss.
+        When y > 0, the loss for those elements is divided by 3.
+        """
+        mse_loss = F.mse_loss(x, y, reduction='none')  # Compute element-wise MSE loss
+        adjust_factor = torch.where(y > 0, 1/3, 1.0)  # Create a factor, 1/3 where y > 0, else 1
+        adjusted_loss = mse_loss * adjust_factor  # Adjust the loss
+        return adjusted_loss.mean()  # Return the mean loss
 
     def train(model_s, model_t, optimizer, epoch, mask):
         # model_s.train_fz_bn()
@@ -121,23 +140,24 @@ def main(args):
         top1_total = 0
         top5_total = 0
         total = 0
-        loss_fun = nn.MSELoss()
+        # loss_fun = nn.MSELoss()
         # loss_fun = at_loss
+        loss_fun = custom_mse_loss
 
         for x, y in pbar:
             x, y = x.cuda(), y.cuda()
 
             optimizer.zero_grad()
+            
+            out_s, fms_s = model_s.forward_with_fms(x, mask)
             with torch.no_grad():
-                out_t, fm1_t, fm2_t, fm3_t, fm4_t = model_t(x)
-            out_s, fm1_s, fm2_s, fm3_s, fm4_s = model_s.forward_with_fm(x, mask)
-            loss = 0
-            loss += loss_fun(fm1_t, fm1_s)*500
-            loss += loss_fun(fm2_t, fm2_s)*500
-            loss += loss_fun(fm3_t, fm3_s)*500
-            loss += loss_fun(fm4_t, fm4_s)*500
+                out_t, fms_t = model_t.forward_with_fms(x, 0)
+            
+            loss = sum(custom_mse_loss(x, y) for x, y in zip(fms_s, fms_t)) * 100
+            # loss = criterion(out_s, y)
             
             loss.backward()
+
             optimizer.step()
             train_loss += loss.item()
             # correct += torch.argmax(fx, 1).eq(y).float().sum().item()
@@ -187,11 +207,7 @@ def main(args):
 
         print('Epoch', epoch, 'Test Acc:', test_acc, 'Test Best:', best_acc)
         return best_acc
-
-    model = ResNet18Poly()
-
-    pretrain_model = torchvision.models.resnet18(pretrained=True)
-
+    
     def copy_parameters(model1, model2):
         for name1 in model1.state_dict():
             param1 = model1.state_dict()[name1]
@@ -209,10 +225,49 @@ def main(args):
             assert(name2 in model2.state_dict())    
             model2.state_dict()[name2].copy_(param1.data)
         
-    copy_parameters(pretrain_model, model)   
+    
 
-    for param in pretrain_model.parameters():
-        param.requires_grad = False 
+    # tmp_best_acc = 0
+
+    pretrain_model = torchvision.models.resnet18(pretrained=True).cuda()
+    # test(pretrain_model, 0, tmp_best_acc, None)
+
+    model_relu = ResNet18Relu()
+    model_relu = model_relu.cuda()
+    
+    copy_parameters(pretrain_model, model_relu)   
+
+    # test(model_relu, 0, tmp_best_acc, 0)
+    # for x, y in testloader:
+    #     x, y = x.cuda(), y.cuda()
+    #     out1, fms = model_relu.forward_with_fms(x, 0)
+    #     out2, fm1, fm2, fm3, fm4 = pretrain_model(x)
+    #     pass
+    #     break
+
+    # return 
+
+    # for param in pretrain_model.parameters():
+    #     param.requires_grad = False 
+
+    mask_x = np.linspace(0, np.pi / 2, 80)[1:]
+    mask_y = 1 - np.sin(mask_x)
+
+    # model_63 = ResNet18Poly().cuda()
+    # model_64 = ResNet18Poly().cuda()
+    # model_63.load_state_dict(torch.load('/home/uconn//xiexi/models_tmp/model_epoch_63.pth'))
+    # model_64.load_state_dict(torch.load('/home/uconn//xiexi/models_tmp/model_epoch_64.pth'))
+
+    
+    # print("mask = ", mask_y[63])
+    # test(model_63, 63, tmp_best_acc, mask_y[63])
+
+    # test(model_63, 63, tmp_best_acc, 0)
+    # print("mask = ", mask_y[64])
+    # test(model_64, 64, tmp_best_acc, mask_y[64])
+
+    model = ResNet18Poly()
+    copy_parameters(pretrain_model, model)
     
     # tmp_test_acc = 0
     # test(pretrain_model.cuda(), 0, tmp_test_acc, None)
@@ -224,12 +279,25 @@ def main(args):
         model = torch.nn.DataParallel(model)
         pretrain_model = torch.nn.DataParallel(pretrain_model)
 
-    pretrain_model = pretrain_model.cuda()
     model = model.cuda()
     model.eval()
-    
-    optimizer = optim.AdamW(model.parameters(), lr = args.lr, weight_decay=args.w_decay)
 
+    relu_poly_params = []
+    other_params = []
+    for name, param in model.named_parameters():
+        if isinstance(getattr(model, name.split('.')[0]), relu_poly):
+            relu_poly_params.append(param)
+        else:
+            other_params.append(param)
+
+    optimizer_params = [
+        {'params': relu_poly_params, 'lr': args.lr / 10},
+        {'params': other_params, 'lr': args.lr} 
+    ]
+
+    optimizer = optim.AdamW(optimizer_params)
+    
+    # optimizer = optim.AdamW(model.parameters(), lr = args.lr, weight_decay=args.w_decay)
     # optimizer = Lookahead(optimizer)
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=t_max)
@@ -252,7 +320,7 @@ def main(args):
 
         print("mask = ", mask)
         writer.add_scalar('Mask value', mask, epoch)
-        train(model, pretrain_model, optimizer, epoch, mask)
+        train(model, model_relu, optimizer, epoch, mask)
         # scheduler.step()
         best_acc = test(model, epoch, best_acc, mask)
 

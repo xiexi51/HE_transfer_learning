@@ -2,26 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class relu_poly(nn.Module):
-    def __init__(self, factor1 = 1, factor2 = 1, factor3 = 1):
-        super(relu_poly, self).__init__()
-        self.weight = torch.nn.Parameter(torch.FloatTensor([0.14, 0.5, 0.28]), requires_grad=True)
-        self.factor1 = factor1
-        self.factor2 = factor2
-        self.factor3 = factor3
-
-    def forward(self, input, mask):
-        y = self.weight[0]*torch.mul(input, input)*self.factor1 + self.weight[1]*input*self.factor2 + self.weight[2]*self.factor3
-        y = F.relu(input) * mask + y * (1 - mask)
-        # print()
-        # print(self.weight[0].detach(), self.weight[1].detach(), self.bias.detach())
-        return y
-
-class BasicBlockPoly(nn.Module):
+class BasicBlockRelu(nn.Module):
     expansion = 1
 
     def __init__(self, in_planes, planes, stride=1):
-        super(BasicBlockPoly, self).__init__()
+        super(BasicBlockRelu, self).__init__()
         self.conv1 = nn.Conv2d(
             in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(planes)
@@ -37,30 +22,30 @@ class BasicBlockPoly(nn.Module):
                 nn.BatchNorm2d(self.expansion*planes)
             )
         
-        self.relu1 = relu_poly()
-        self.relu2 = relu_poly()
+        self.relu1 = nn.ReLU()
+        self.relu2 = nn.ReLU()
 
-    def forward(self, x, mask):
-        out = self.relu1(self.bn1(self.conv1(x)), mask)
+    def forward(self, x):
+        out = self.relu1(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
         out += self.shortcut(x)
-        out = self.relu2(out, mask)
+        out = self.relu2(out)
         return out
-
-    def forward_with_fms(self, x, mask):
+    
+    def forward_with_fms(self, x):
         fms = []
-        out = self.relu1(self.bn1(self.conv1(x)), mask)
-        fms.append(out)
+        out = self.relu1(self.bn1(self.conv1(x)))
+        fms.append(out.detach())
         out = self.bn2(self.conv2(out))
         out += self.shortcut(x)
-        out = self.relu2(out, mask)
-        fms.append(out)
+        out = self.relu2(out)
+        fms.append(out.detach())
         return out, fms
 
 
-class ResNetPoly(nn.Module):
+class ResNetRelu(nn.Module):
     def __init__(self, block, num_blocks, num_classes=10):
-        super(ResNetPoly, self).__init__()
+        super(ResNetRelu, self).__init__()
         self.in_planes = 64
 
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
@@ -74,7 +59,7 @@ class ResNetPoly(nn.Module):
 
         self.linear = nn.Linear(512*block.expansion, num_classes)
 
-        self.relu1 = relu_poly()
+        self.relu1 = nn.ReLU()
 
     def _create_blocks(self, block, planes, num_blocks, stride):
         strides = [stride] + [1]*(num_blocks-1)
@@ -94,29 +79,29 @@ class ResNetPoly(nn.Module):
         out = self.bn1(out)
         torch.save(out, f"{save_dir}/bn1_activation.pt")
 
-        out = self.relu1(out, mask)
+        out = self.relu1(out)
         torch.save(out, f"{save_dir}/relu1.pt")
         out = self.maxpool1(out)
         torch.save(out, f"{save_dir}/maxpool1.pt")
 
-        out = self.layer1_0(out, mask)
+        out = self.layer1_0(out)
         torch.save(out, f"{save_dir}/layer1_0.pt")
-        out = self.layer1_1(out, mask)
+        out = self.layer1_1(out)
         torch.save(out, f"{save_dir}/layer1_1.pt")
 
-        out = self.layer2_0(out, mask)
+        out = self.layer2_0(out)
         torch.save(out, f"{save_dir}/layer2_0.pt")
-        out = self.layer2_1(out, mask)
+        out = self.layer2_1(out)
         torch.save(out, f"{save_dir}/layer2_1.pt")
 
-        out = self.layer3_0(out, mask)
+        out = self.layer3_0(out)
         torch.save(out, f"{save_dir}/layer3_0.pt")
-        out = self.layer3_1(out, mask)
+        out = self.layer3_1(out)
         torch.save(out, f"{save_dir}/layer3_1.pt")
 
-        out = self.layer4_0(out, mask)
+        out = self.layer4_0(out)
         torch.save(out, f"{save_dir}/layer4_0.pt")
-        out = self.layer4_1(out, mask)
+        out = self.layer4_1(out)
         torch.save(out, f"{save_dir}/layer4_1.pt")
 
         out = F.adaptive_avg_pool2d(out, (1, 1))
@@ -125,35 +110,22 @@ class ResNetPoly(nn.Module):
         torch.save(out, f"{save_dir}/out_view.pt")
         out = self.linear(out)
         torch.save(out, f"{save_dir}/linear.pt")
-        return out
-
-    def train_fz_bn(self, freeze_bn=True, freeze_bn_affine=True, mode=True):
-        """
-            Override the default train() to freeze the BN parameters
-        """
-        self.train(mode)
-        for m in self.modules():
-            if isinstance(m, nn.BatchNorm2d):
-                m.eval()
-                if (freeze_bn_affine and m.affine == True):
-                    m.weight.requires_grad = not freeze_bn
-                    m.bias.requires_grad = not freeze_bn
-        
+        return out    
 
     def forward(self, x, mask):
 
         out = self.conv1(x)
         out = self.bn1(out)
-        out = self.relu1(out, mask)
+        out = self.relu1(out)
         out = self.maxpool1(out)
-        out = self.layer1_0(out, mask)
-        out = self.layer1_1(out, mask)
-        out = self.layer2_0(out, mask)
-        out = self.layer2_1(out, mask)
-        out = self.layer3_0(out, mask)
-        out = self.layer3_1(out, mask)
-        out = self.layer4_0(out, mask)
-        out = self.layer4_1(out, mask)
+        out = self.layer1_0(out)
+        out = self.layer1_1(out)
+        out = self.layer2_0(out)
+        out = self.layer2_1(out)
+        out = self.layer3_0(out)
+        out = self.layer3_1(out)
+        out = self.layer4_0(out)
+        out = self.layer4_1(out)
         out = F.adaptive_avg_pool2d(out, (1,1))
         out = out.view(out.size(0), -1)
         out = self.linear(out)
@@ -164,27 +136,27 @@ class ResNetPoly(nn.Module):
         fms = []
         out = self.conv1(x)
         out = self.bn1(out)
-        out = self.relu1(out, mask)
-        fms.append(out)
+        out = self.relu1(out)
+        fms.append(out.detach())
         out = self.maxpool1(out)
-        out, _fms = self.layer1_0.forward_with_fms(out, mask)
+        out, _fms = self.layer1_0.forward_with_fms(out)
         fms += _fms
-        out, _fms = self.layer1_1.forward_with_fms(out, mask)
+        out, _fms = self.layer1_1.forward_with_fms(out)
         fms += _fms
         
-        out, _fms = self.layer2_0.forward_with_fms(out, mask)
+        out, _fms = self.layer2_0.forward_with_fms(out)
         fms += _fms
-        out, _fms = self.layer2_1.forward_with_fms(out, mask)
-        fms += _fms
-
-        out, _fms = self.layer3_0.forward_with_fms(out, mask)
-        fms += _fms
-        out, _fms = self.layer3_1.forward_with_fms(out, mask)
+        out, _fms = self.layer2_1.forward_with_fms(out)
         fms += _fms
 
-        out, _fms = self.layer4_0.forward_with_fms(out, mask)
+        out, _fms = self.layer3_0.forward_with_fms(out)
         fms += _fms
-        out, _fms = self.layer4_1.forward_with_fms(out, mask)
+        out, _fms = self.layer3_1.forward_with_fms(out)
+        fms += _fms
+
+        out, _fms = self.layer4_0.forward_with_fms(out)
+        fms += _fms
+        out, _fms = self.layer4_1.forward_with_fms(out)
         fms += _fms
 
         out = F.adaptive_avg_pool2d(out, (1,1))
@@ -193,5 +165,5 @@ class ResNetPoly(nn.Module):
 
         return out, fms
 
-def ResNet18Poly():
-    return ResNetPoly(BasicBlockPoly, [2, 2, 2, 2], 1000)
+def ResNet18Relu():
+    return ResNetRelu(BasicBlockRelu, [2, 2, 2, 2], 1000)
