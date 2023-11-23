@@ -17,6 +17,7 @@ from model_relu import ResNet18Relu
 import numpy as np
 import shutil
 import sys
+import matplotlib.pyplot as plt
 
 from datetime import datetime
 from utils import *
@@ -28,8 +29,8 @@ parser.add_argument('--epoch', default=100, type=int)
 parser.add_argument('--lr', default=0.0001, type=float, help='learning rate')
 parser.add_argument('--w_decay', default=0.000, type=float, help='w decay rate')
 parser.add_argument('--optim', type=str, default='adamw', choices = ['sgd', 'adamw'])
-parser.add_argument('--batch_size_train', type=int, default=500, help='Batch size for training')
-parser.add_argument('--batch_size_test', type=int, default=500, help='Batch size for testing')
+parser.add_argument('--batch_size_train', type=int, default=200, help='Batch size for training')
+parser.add_argument('--batch_size_test', type=int, default=200, help='Batch size for testing')
 parser.add_argument('--hidden_dim', type=int, default=0, help='Hidden dimension in the classifier')
 parser.add_argument('--drop', type=float, default=0)
 parser.add_argument('--add_bias1', type=ast.literal_eval, default=False)
@@ -37,7 +38,7 @@ parser.add_argument('--add_bias2', type=ast.literal_eval, default=False)
 parser.add_argument('--add_relu', type=ast.literal_eval, default=False)
 parser.add_argument('--unfreeze_mode', type=str, default='none', choices=['none', 'b2_conv2', 'b2'])
 parser.add_argument('--data_augment', type=ast.literal_eval, default=False)
-parser.add_argument('--num_workers', type=int, default=20)
+parser.add_argument('--num_workers', type=int, default=10)
 parser.add_argument('--pbar', type=ast.literal_eval, default=True)
 parser.add_argument('--log_root', type=str)
 args = parser.parse_args()
@@ -65,11 +66,11 @@ def main(args):
         ])
     
     trainset = torchvision.datasets.ImageFolder(
-        root='/home/uconn/xiexi/poly_replace/subset2' , transform=transform_train)
+        root='/data/xiexi/poly_replace/subset2' , transform=transform_train)
     trainloader = torch.utils.data.DataLoader(
         trainset, batch_size = args.batch_size_train, shuffle=True, num_workers=args.num_workers)
     testset = torchvision.datasets.ImageFolder(
-        root='/home/uconn/dataset/imagenet/val', transform=transform_test)
+        root='/data/imagenet/val', transform=transform_test)
     testloader = torch.utils.data.DataLoader(
         testset, batch_size = args.batch_size_test, shuffle=False, num_workers=args.num_workers)
 
@@ -196,6 +197,7 @@ def main(args):
             top5_total += top5[0] * x.size(0)
             total += x.size(0)
             pbar.set_postfix_str(f"Top-1 Acc {100*top1_total/total:.2f}%, Top-5 Acc {100*top5_total/total:.2f}%")
+            break
 
         test_acc = (top1_total / total).item()
         writer.add_scalar('Accuracy/test', test_acc, epoch)
@@ -227,10 +229,11 @@ def main(args):
         
     
 
-    # tmp_best_acc = 0
+    tmp_best_acc = 0
 
     pretrain_model = torchvision.models.resnet18(pretrained=True).cuda()
     # test(pretrain_model, 0, tmp_best_acc, None)
+    
 
     model_relu = ResNet18Relu()
     model_relu = model_relu.cuda()
@@ -238,14 +241,54 @@ def main(args):
     copy_parameters(pretrain_model, model_relu)   
 
     # test(model_relu, 0, tmp_best_acc, 0)
-    # for x, y in testloader:
-    #     x, y = x.cuda(), y.cuda()
-    #     out1, fms = model_relu.forward_with_fms(x, 0)
-    #     out2, fm1, fm2, fm3, fm4 = pretrain_model(x)
-    #     pass
-    #     break
+    
+    
+    for x, y in testloader:
+        x, y = x.cuda(), y.cuda()
+        out1, fms_pre, fms = model_relu.forward_with_fms_and_pre(x, 0)
+        # out2, fm1, fm2, fm3, fm4 = pretrain_model(x)
+        
+        num_fms_pre = len(fms_pre)
+        plt.figure(figsize=(10, 4 * num_fms_pre))
+        
+        for idx, pre in enumerate(fms_pre):
+            n = pre.shape[1]
+            mean_abs_values = []
 
-    # return 
+            for i in range(n):
+                mean_abs = torch.mean(torch.abs(pre[:, i, :, :]))
+                mean_abs_values.append(mean_abs.item())
+
+            ax = plt.subplot(num_fms_pre, 1, idx + 1)
+            ax.bar(range(n), mean_abs_values)
+            ax.set_xlabel('n index')
+            ax.set_ylabel('Mean Absolute Value')
+            ax.set_title(f'Mean Absolute Values for pre #{idx} along dimension 1')
+        
+        
+        # for idx, pre in enumerate(fms_pre):
+        #     m = pre.shape[0]
+        #     mean_abs_values = []
+
+        #     for i in range(m):
+        #         mean_abs = torch.mean(torch.abs(pre[i]))
+        #         mean_abs_values.append(mean_abs.item())
+
+        #     ax = plt.subplot(num_fms_pre, 1, idx + 1)
+        #     ax.bar(range(m), mean_abs_values)
+        #     ax.set_xlabel('m index')
+        #     ax.set_ylabel('Mean Absolute Value')
+        #     ax.set_title(f'Mean Absolute Values for pre #{idx}')
+
+        plt.tight_layout()
+        
+        plt.savefig("fms_pre1.png")
+        plt.show()
+        
+        break
+    
+
+    return 
 
     # for param in pretrain_model.parameters():
     #     param.requires_grad = False 
@@ -282,17 +325,29 @@ def main(args):
     model = model.cuda()
     model.eval()
 
+    def find_submodule(module, submodule_name):
+        names = submodule_name.split('.')
+        for name in names:
+            module = getattr(module, name, None)
+            if module is None:
+                return None
+        return module
+
     relu_poly_params = []
     other_params = []
+
     for name, param in model.named_parameters():
-        if isinstance(getattr(model, name.split('.')[0]), relu_poly):
+        submodule_name = '.'.join(name.split('.')[:-1])
+        submodule = find_submodule(model, submodule_name)
+        
+        if isinstance(submodule, relu_poly):
             relu_poly_params.append(param)
         else:
             other_params.append(param)
 
     optimizer_params = [
-        {'params': relu_poly_params, 'lr': args.lr / 10},
-        {'params': other_params, 'lr': args.lr} 
+        {'params': relu_poly_params, 'lr': args.lr / 1},
+        {'params': other_params, 'lr': args.lr}
     ]
 
     optimizer = optim.AdamW(optimizer_params)

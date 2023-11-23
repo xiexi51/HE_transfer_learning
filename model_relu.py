@@ -41,6 +41,23 @@ class BasicBlockRelu(nn.Module):
         out = self.relu2(out)
         fms.append(out.detach())
         return out, fms
+    
+    def forward_with_fms_and_pre(self, x):
+        fms = []
+        fms_pre = []
+        out = self.bn1(self.conv1(x))
+        
+        fms_pre.append(out.detach())
+        out = self.relu1(out)
+        fms.append(out.detach())
+        
+        out = self.bn2(self.conv2(out))
+        out += self.shortcut(x)
+        
+        fms_pre.append(out.detach())
+        out = self.relu2(out)
+        fms.append(out.detach())
+        return out, fms_pre, fms
 
 
 class ResNetRelu(nn.Module):
@@ -136,27 +153,27 @@ class ResNetRelu(nn.Module):
         fms = []
         out = self.conv1(x)
         out = self.bn1(out)
-        out = self.relu1(out)
-        fms.append(out.detach())
+        out = self.relu1(out, mask)
+        fms.append(out)
         out = self.maxpool1(out)
-        out, _fms = self.layer1_0.forward_with_fms(out)
+        out, _fms = self.layer1_0.forward_with_fms(out, mask)
         fms += _fms
-        out, _fms = self.layer1_1.forward_with_fms(out)
+        out, _fms = self.layer1_1.forward_with_fms(out, mask)
         fms += _fms
         
-        out, _fms = self.layer2_0.forward_with_fms(out)
+        out, _fms = self.layer2_0.forward_with_fms(out, mask)
         fms += _fms
-        out, _fms = self.layer2_1.forward_with_fms(out)
-        fms += _fms
-
-        out, _fms = self.layer3_0.forward_with_fms(out)
-        fms += _fms
-        out, _fms = self.layer3_1.forward_with_fms(out)
+        out, _fms = self.layer2_1.forward_with_fms(out, mask)
         fms += _fms
 
-        out, _fms = self.layer4_0.forward_with_fms(out)
+        out, _fms = self.layer3_0.forward_with_fms(out, mask)
         fms += _fms
-        out, _fms = self.layer4_1.forward_with_fms(out)
+        out, _fms = self.layer3_1.forward_with_fms(out, mask)
+        fms += _fms
+
+        out, _fms = self.layer4_0.forward_with_fms(out, mask)
+        fms += _fms
+        out, _fms = self.layer4_1.forward_with_fms(out, mask)
         fms += _fms
 
         out = F.adaptive_avg_pool2d(out, (1,1))
@@ -164,6 +181,63 @@ class ResNetRelu(nn.Module):
         out = self.linear(out)
 
         return out, fms
+    
+    def forward_with_fms_and_pre(self, x, mask):
+        fms_pre = []
+        fms = []
+        
+        out = self.conv1(x)
+        out = self.bn1(out)
+        
+        fms_pre.append(out.detach())
+        out = self.relu1(out)
+        fms.append(out.detach())
+        
+        out = self.maxpool1(out)
+        
+        out, _fms_pre, _fms = self.layer1_0.forward_with_fms_and_pre(out)
+        fms_pre += _fms_pre
+        fms += _fms
+        
+        
+        out, _fms_pre, _fms = self.layer1_1.forward_with_fms_and_pre(out)
+        fms_pre += _fms_pre
+        fms += _fms
+        
+        fms_pre += _fms_pre
+        out, _fms_pre, _fms = self.layer2_0.forward_with_fms_and_pre(out)
+        fms += _fms
+        
+        
+        out, _fms_pre, _fms = self.layer2_1.forward_with_fms_and_pre(out)
+        fms_pre += _fms_pre
+        fms += _fms
+
+        
+        out, _fms_pre, _fms = self.layer3_0.forward_with_fms_and_pre(out)
+        fms_pre += _fms_pre
+        fms += _fms
+        
+        
+        out, _fms_pre, _fms = self.layer3_1.forward_with_fms_and_pre(out)
+        fms_pre += _fms_pre
+        fms += _fms
+
+        
+        out, _fms_pre, _fms = self.layer4_0.forward_with_fms_and_pre(out)
+        fms_pre += _fms_pre
+        fms += _fms
+        
+        
+        out, _fms_pre, _fms = self.layer4_1.forward_with_fms_and_pre(out)
+        fms_pre += _fms_pre
+        fms += _fms
+
+        out = F.adaptive_avg_pool2d(out, (1,1))
+        out = out.view(out.size(0), -1)
+        out = self.linear(out)
+
+        return out, fms_pre, fms
 
 def ResNet18Relu():
     return ResNetRelu(BasicBlockRelu, [2, 2, 2, 2], 1000)
