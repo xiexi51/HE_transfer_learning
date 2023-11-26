@@ -85,3 +85,15 @@ class SoftTarget(nn.Module):
 						F.softmax(out_t/self.T, dim=1),
 						reduction='batchmean') * self.T * self.T
 		return loss
+
+class STEFunction(torch.autograd.Function):
+    """ define straight through estimator with overrided gradient (gate) """
+    @staticmethod
+    def forward(ctx, input):
+        ctx.save_for_backward(input)
+        return (input > 0).float()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        input, = ctx.saved_tensors
+        return torch.mul(F.softplus(input), grad_output)

@@ -12,7 +12,7 @@ import time
 import ast
 import torch.nn.init as init
 from tqdm import tqdm
-from model import ResNet18Poly, channelwise_relu_poly
+from model import ResNet18Poly, pixel_relu_poly
 from model_relu import ResNet18Relu
 import numpy as np
 import shutil
@@ -25,7 +25,7 @@ parser = argparse.ArgumentParser(description='Transfer from ImageNet pretrain to
 
 parser.add_argument('--id', default=0, type=int)
 parser.add_argument('--epoch', default=100, type=int)
-parser.add_argument('--lr', default=0.0005, type=float, help='learning rate')
+parser.add_argument('--lr', default=0.0001, type=float, help='learning rate')
 parser.add_argument('--w_decay', default=0.000, type=float, help='w decay rate')
 parser.add_argument('--optim', type=str, default='adamw', choices = ['sgd', 'adamw'])
 parser.add_argument('--batch_size_train', type=int, default=500, help='Batch size for training')
@@ -189,6 +189,7 @@ def main(args):
         writer.add_scalar('Loss_fm/train', train_loss_fm/total, epoch)
         writer.add_scalar('Loss_kd/train', train_loss_kd/total, epoch)
         writer.add_scalar('Loss_ce/train', train_loss_ce/total, epoch)
+        return train_acc
             
     def test(model, epoch, best_acc, mask):
         model.eval()
@@ -282,17 +283,18 @@ def main(args):
         submodule_name = '.'.join(name.split('.')[:-1])
         submodule = find_submodule(model, submodule_name)
         
-        if isinstance(submodule, channelwise_relu_poly):
+        if isinstance(submodule, pixel_relu_poly):
             relu_poly_params.append(param)
         else:
             other_params.append(param)
 
     optimizer_params = [
-        {'params': relu_poly_params, 'lr': 0},
+        {'params': relu_poly_params, 'lr': args.lr},
         {'params': other_params, 'lr': args.lr}
     ]
     
     optimizer = optim.AdamW(optimizer_params)
+
     # optimizer = optim.AdamW(param_groups)
     # optimizer = optim.AdamW(model.parameters(), lr = args.lr, weight_decay=args.w_decay)
 
@@ -319,13 +321,17 @@ def main(args):
         if mask < 0:
             mask = 0
 
-        # mask = 0
+        # mask = 1
 
         print("mask = ", mask)
         writer.add_scalar('Mask value', mask, epoch)
-        train(model, model_relu, optimizer, epoch, mask)
+        if epoch >= 1:
+            total_elements, relu_elements = model.get_relu_density(mask)
+            print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
+        train_acc = train(model, model_relu, optimizer, epoch, mask)
         # scheduler.step()
-        best_acc = test(model, epoch, best_acc, mask)
+        if train_acc < 0.6:
+            best_acc = test(model, epoch, best_acc, mask)
 
         # Save the model after each epoch
         torch.save(model.state_dict(), f"{log_dir}/model_epoch_{epoch}.pth")

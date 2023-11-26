@@ -41,6 +41,32 @@ class channelwise_relu_poly(nn.Module):
         y = square_term + linear_term
         y = F.relu(input) * mask + y * (1 - mask)
         return y
+    
+class pixel_relu_poly(nn.Module):
+    def __init__(self, factor1 = 0.01, factor2 = 1, factor3 = 0.01):
+        super(pixel_relu_poly, self).__init__()
+        self.weight = torch.nn.Parameter(torch.FloatTensor([0, 1, 0]), requires_grad=True)
+        self.factor1 = factor1
+        self.factor2 = factor2
+        self.factor3 = factor3
+        self.rand_mask = None
+
+    def forward(self, input, mask):
+        if self.rand_mask is None or self.rand_mask.shape != input.shape[1:]:
+            self.rand_mask = torch.rand(input.shape[1:], device=input.device)
+
+        if_relu = mask > self.rand_mask
+        y = self.weight[0] * torch.mul(input, input) * self.factor1 + self.weight[1] * input * self.factor2 + self.weight[2] * self.factor3
+        y = F.relu(input) * if_relu.float() + y * (1 - if_relu.float())
+        
+        return y
+    
+    def get_relu_density(self, mask):
+        if_relu = mask > self.rand_mask
+        total_elements = self.rand_mask.numel()
+        relu_elements = if_relu.sum().item()
+        return total_elements, relu_elements
+
 
 class BasicBlockPoly(nn.Module):
     expansion = 1
@@ -62,8 +88,10 @@ class BasicBlockPoly(nn.Module):
                 nn.BatchNorm2d(self.expansion*planes)
             )
 
-        self.relu1 = channelwise_relu_poly(planes)
-        self.relu2 = channelwise_relu_poly(planes, factor1=poly_square_factor)
+        # self.relu1 = channelwise_relu_poly(planes)
+        # self.relu2 = channelwise_relu_poly(planes, factor1=poly_square_factor)
+        self.relu1 = pixel_relu_poly()
+        self.relu2 = pixel_relu_poly()
 
     def forward(self, x, mask):
         out = self.relu1(self.bn1(self.conv1(x)), mask)
@@ -81,6 +109,11 @@ class BasicBlockPoly(nn.Module):
         out = self.relu2(out, mask)
         fms.append(out)
         return out, fms
+    
+    def get_relu_density(self, mask):
+        total1, relu1 = self.relu1.get_relu_density(mask)
+        total2, relu2 = self.relu2.get_relu_density(mask)
+        return total1 + total2, relu1 + relu2
 
 
 class ResNetPoly(nn.Module):
@@ -99,7 +132,8 @@ class ResNetPoly(nn.Module):
 
         self.linear = nn.Linear(512*block.expansion, num_classes)
 
-        self.relu1 = channelwise_relu_poly(64)
+        # self.relu1 = channelwise_relu_poly(64)
+        self.relu1 = pixel_relu_poly()
 
     def _create_blocks(self, block, planes, num_blocks, stride):
         strides = [stride] + [1]*(num_blocks-1)
@@ -221,6 +255,23 @@ class ResNetPoly(nn.Module):
         out = self.linear(out)
 
         return out, fms
+
+    def get_relu_density(self, mask):
+        total1, relu1 = self.relu1.get_relu_density(mask)
+        total1_0, relu1_0 = self.layer1_0.get_relu_density(mask)
+        total1_1, relu1_1 = self.layer1_1.get_relu_density(mask)
+        total2_0, relu2_0 = self.layer2_0.get_relu_density(mask)
+        total2_1, relu2_1 = self.layer2_1.get_relu_density(mask)
+        total3_0, relu3_0 = self.layer3_0.get_relu_density(mask)
+        total3_1, relu3_1 = self.layer3_1.get_relu_density(mask)
+        total4_0, relu4_0 = self.layer4_0.get_relu_density(mask)
+        total4_1, relu4_1 = self.layer4_1.get_relu_density(mask)
+        
+        total_sum = total1 + total1_0 + total1_1 + total2_0 + total2_1 + total3_0 + total3_1 + total4_0 + total4_1
+        relu_sum = relu1 + relu1_0 + relu1_1 + relu2_0 + relu2_1 + relu3_0 + relu3_1 + relu4_0 + relu4_1
+
+        return total_sum, relu_sum
+        
 
 def ResNet18Poly():
     return ResNetPoly(BasicBlockPoly, [2, 2, 2, 2], 1000)
