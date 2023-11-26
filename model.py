@@ -3,9 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class relu_poly(nn.Module):
-    def __init__(self, factor1 = 0.01, factor2 = 1, factor3 = 0.01):
+    def __init__(self, factor1 = 1, factor2 = 1, factor3 = 1):
         super(relu_poly, self).__init__()
-        self.weight = torch.nn.Parameter(torch.FloatTensor([0.00, 1, 0.00]), requires_grad=True)
+        self.weight = torch.nn.Parameter(torch.FloatTensor([0.14, 0.5, 0.28]), requires_grad=True)
         self.factor1 = factor1
         self.factor2 = factor2
         self.factor3 = factor3
@@ -13,12 +13,15 @@ class relu_poly(nn.Module):
     def forward(self, input, mask):
         y = self.weight[0]*torch.mul(input, input)*self.factor1 + self.weight[1]*input*self.factor2 + self.weight[2]*self.factor3
         y = F.relu(input) * mask + y * (1 - mask)
+        # print()
+        # print(self.weight[0].detach(), self.weight[1].detach(), self.bias.detach())
         return y
 
 class channelwise_relu_poly(nn.Module):
-    def __init__(self, num_channels, factor1=0.1, factor2=1, factor3=0.1):
+    def __init__(self, num_channels, factor1=1, factor2=1, factor3=0):
         super(channelwise_relu_poly, self).__init__()
-        initial_weights = torch.zeros(num_channels, 3)
+        initial_weights = torch.zeros(num_channels, 2)
+        initial_weights[:, 0] = 0
         initial_weights[:, 1] = 1  
         self.weight = nn.Parameter(initial_weights, requires_grad=True)
         self.factor1 = factor1
@@ -32,16 +35,17 @@ class channelwise_relu_poly(nn.Module):
 
         square_term = weights[:, 0, :, :] * torch.mul(input, input) * self.factor1
         linear_term = weights[:, 1, :, :] * input * self.factor2
-        constant_term = weights[:, 2, :, :] * self.factor3
+        # constant_term = weights[:, 2, :, :] * self.factor3
 
-        y = square_term + linear_term + constant_term
+        # y = square_term + linear_term + constant_term
+        y = square_term + linear_term
         y = F.relu(input) * mask + y * (1 - mask)
         return y
 
 class BasicBlockPoly(nn.Module):
     expansion = 1
 
-    def __init__(self, in_planes, planes, stride=1):
+    def __init__(self, in_planes, planes, stride=1, poly_square_factor=1):
         super(BasicBlockPoly, self).__init__()
         self.conv1 = nn.Conv2d(
             in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
@@ -57,9 +61,9 @@ class BasicBlockPoly(nn.Module):
                           kernel_size=1, stride=stride, bias=False),
                 nn.BatchNorm2d(self.expansion*planes)
             )
-        
+
         self.relu1 = channelwise_relu_poly(planes)
-        self.relu2 = channelwise_relu_poly(planes)
+        self.relu2 = channelwise_relu_poly(planes, factor1=poly_square_factor)
 
     def forward(self, x, mask):
         out = self.relu1(self.bn1(self.conv1(x)), mask)
@@ -67,6 +71,16 @@ class BasicBlockPoly(nn.Module):
         out += self.shortcut(x)
         out = self.relu2(out, mask)
         return out
+
+    def forward_with_fms(self, x, mask):
+        fms = []
+        out = self.relu1(self.bn1(self.conv1(x)), mask)
+        fms.append(out)
+        out = self.bn2(self.conv2(out))
+        out += self.shortcut(x)
+        out = self.relu2(out, mask)
+        fms.append(out)
+        return out, fms
 
 
 class ResNetPoly(nn.Module):
@@ -91,28 +105,13 @@ class ResNetPoly(nn.Module):
         strides = [stride] + [1]*(num_blocks-1)
         blocks = []
         for stride in strides:
-            blocks.append(block(self.in_planes, planes, stride))
+            if planes == 512 and stride == 1:
+                blocks.append(block(self.in_planes, planes, stride, poly_square_factor = 0.2))
+            else:
+                blocks.append(block(self.in_planes, planes, stride))
+
             self.in_planes = planes * block.expansion
         return blocks
-
-    def forward(self, x, mask):
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu1(out, mask)
-        out = self.maxpool1(out)
-        out = self.layer1_0(out, mask)
-        out = self.layer1_1(out, mask)
-        out = self.layer2_0(out, mask)
-        out = self.layer2_1(out, mask)
-        out = self.layer3_0(out, mask)
-        out = self.layer3_1(out, mask)
-        out = self.layer4_0(out, mask)
-        out = self.layer4_1(out, mask)
-        out = F.adaptive_avg_pool2d(out, (1,1))
-        out = out.view(out.size(0), -1)
-        out = self.linear(out)
-
-        return out
 
     def forward_save(self, x, mask, save_dir):
         torch.save(x, f"{save_dir}/x_before_conv1.pt")
@@ -156,38 +155,6 @@ class ResNetPoly(nn.Module):
         out = self.linear(out)
         torch.save(out, f"{save_dir}/linear.pt")
         return out
-    
-    def forward_with_fm(self, x, mask):
-
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu1(out, mask)
-        out = self.maxpool1(out)
-        out = self.layer1_0(out, mask)
-        out = self.layer1_1(out, mask)
-        #export
-        fm1 = out
-        
-        out = self.layer2_0(out, mask)
-        out = self.layer2_1(out, mask)
-        #export
-        fm2 = out
-
-        out = self.layer3_0(out, mask)
-        out = self.layer3_1(out, mask)
-        #export
-        fm3 = out
-
-        out = self.layer4_0(out, mask)
-        out = self.layer4_1(out, mask)
-        #export
-        fm4 = out
-
-        out = F.adaptive_avg_pool2d(out, (1,1))
-        out = out.view(out.size(0), -1)
-        out = self.linear(out)
-
-        return out, fm1, fm2, fm3, fm4
 
     def train_fz_bn(self, freeze_bn=True, freeze_bn_affine=True, mode=True):
         """
@@ -200,6 +167,60 @@ class ResNetPoly(nn.Module):
                 if (freeze_bn_affine and m.affine == True):
                     m.weight.requires_grad = not freeze_bn
                     m.bias.requires_grad = not freeze_bn
+        
+
+    def forward(self, x, mask):
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu1(out, mask)
+        out = self.maxpool1(out)
+        out = self.layer1_0(out, mask)
+        out = self.layer1_1(out, mask)
+        out = self.layer2_0(out, mask)
+        out = self.layer2_1(out, mask)
+        out = self.layer3_0(out, mask)
+        out = self.layer3_1(out, mask)
+        out = self.layer4_0(out, mask)
+        out = self.layer4_1(out, mask)
+        out = F.adaptive_avg_pool2d(out, (1,1))
+        out = out.view(out.size(0), -1)
+        out = self.linear(out)
+
+        return out
+    
+    def forward_with_fms(self, x, mask):
+        fms = []
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu1(out, mask)
+        fms.append(out)
+        out = self.maxpool1(out)
+        out, _fms = self.layer1_0.forward_with_fms(out, mask)
+        fms += _fms
+        out, _fms = self.layer1_1.forward_with_fms(out, mask)
+        fms += _fms
+        
+        out, _fms = self.layer2_0.forward_with_fms(out, mask)
+        fms += _fms
+        out, _fms = self.layer2_1.forward_with_fms(out, mask)
+        fms += _fms
+
+        out, _fms = self.layer3_0.forward_with_fms(out, mask)
+        fms += _fms
+        out, _fms = self.layer3_1.forward_with_fms(out, mask)
+        fms += _fms
+
+        out, _fms = self.layer4_0.forward_with_fms(out, mask)
+        fms += _fms
+        out, _fms = self.layer4_1.forward_with_fms(out, mask)
+        fms += _fms
+
+        out = F.adaptive_avg_pool2d(out, (1,1))
+        out = out.view(out.size(0), -1)
+        out = self.linear(out)
+
+        return out, fms
 
 def ResNet18Poly():
     return ResNetPoly(BasicBlockPoly, [2, 2, 2, 2], 1000)

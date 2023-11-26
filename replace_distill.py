@@ -13,6 +13,7 @@ import ast
 import torch.nn.init as init
 from tqdm import tqdm
 from model import ResNet18Poly, channelwise_relu_poly
+from model_relu import ResNet18Relu
 import numpy as np
 import shutil
 import sys
@@ -24,7 +25,7 @@ parser = argparse.ArgumentParser(description='Transfer from ImageNet pretrain to
 
 parser.add_argument('--id', default=0, type=int)
 parser.add_argument('--epoch', default=100, type=int)
-parser.add_argument('--lr', default=0.0001, type=float, help='learning rate')
+parser.add_argument('--lr', default=0.0005, type=float, help='learning rate')
 parser.add_argument('--w_decay', default=0.000, type=float, help='w decay rate')
 parser.add_argument('--optim', type=str, default='adamw', choices = ['sgd', 'adamw'])
 parser.add_argument('--batch_size_train', type=int, default=500, help='Batch size for training')
@@ -36,7 +37,7 @@ parser.add_argument('--add_bias2', type=ast.literal_eval, default=False)
 parser.add_argument('--add_relu', type=ast.literal_eval, default=False)
 parser.add_argument('--unfreeze_mode', type=str, default='none', choices=['none', 'b2_conv2', 'b2'])
 parser.add_argument('--data_augment', type=ast.literal_eval, default=False)
-parser.add_argument('--num_workers', type=int, default=4)
+parser.add_argument('--num_workers', type=int, default=10)
 parser.add_argument('--pbar', type=ast.literal_eval, default=True)
 parser.add_argument('--log_root', type=str)
 args = parser.parse_args()
@@ -111,6 +112,16 @@ def main(args):
                 correct_k = correct[:k].flatten().float().sum(0, keepdim=True)
                 res.append(correct_k.mul_(1.0 / batch_size))
             return res
+    
+    def custom_mse_loss(x, y):
+        """
+        Compute the mean squared error loss.
+        When y > 0, the loss for those elements is divided by 3.
+        """
+        mse_loss = F.mse_loss(x, y, reduction='none')  # Compute element-wise MSE loss
+        adjust_factor = torch.where(y > 0, 1/3, 1.0)  # Create a factor, 1/3 where y > 0, else 1
+        adjusted_loss = mse_loss * adjust_factor  # Adjust the loss
+        return adjusted_loss.mean()  # Return the mean loss
 
     def train(model_s, model_t, optimizer, epoch, mask):
         # model_s.train_fz_bn()
@@ -132,8 +143,9 @@ def main(args):
         top1_total = 0
         top5_total = 0
         total = 0
-        loss_fun = nn.MSELoss()
-        # loss_fun = at_loss
+        # loss_fun = nn.MSELoss()
+        loss_fun = at_loss
+        # loss_fun = custom_mse_loss
 
         criterion_kd = SoftTarget(4.0).cuda()
         criterion_ce = nn.CrossEntropyLoss()
@@ -143,19 +155,16 @@ def main(args):
 
             optimizer.zero_grad()
             with torch.no_grad():
-                out_t, fm1_t, fm2_t, fm3_t, fm4_t = model_t(x)
-            out_s, fm1_s, fm2_s, fm3_s, fm4_s = model_s.forward_with_fm(x, mask)
-            loss_fm = 0
-            loss_fm += loss_fun(fm1_t, fm1_s)*500
-            loss_fm += loss_fun(fm2_t, fm2_s)*500
-            loss_fm += loss_fun(fm3_t, fm3_s)*500
-            loss_fm += loss_fun(fm4_t, fm4_s)*500
+                out_t, fms_t = model_t.forward_with_fms(x, 0)
+            out_s, fms_s = model_s.forward_with_fms(x, mask)
 
-            kd_loss = criterion_kd(out_s, out_t) *100
-            ce_loss = criterion_ce(out_s, y) *100
+            loss_fm = sum(loss_fun(x, y) for x, y in zip(fms_s, fms_t)) * 100
+
+            kd_loss = criterion_kd(out_s, out_t) *1
+            ce_loss = criterion_ce(out_s, y) *1
 
             loss = kd_loss + ce_loss + loss_fm
-            # loss = loss_fm
+            # loss = ce_loss + loss_fm
             
             loss.backward()
             optimizer.step()
@@ -239,8 +248,10 @@ def main(args):
         
     copy_parameters(pretrain_model, model)   
 
-    for param in pretrain_model.parameters():
-        param.requires_grad = False 
+    model_relu = ResNet18Relu()
+    model_relu = model_relu.cuda()
+    
+    copy_parameters(pretrain_model, model_relu)   
     
     # tmp_test_acc = 0
     # test(pretrain_model.cuda(), 0, tmp_test_acc, None)
@@ -256,25 +267,36 @@ def main(args):
     model = model.cuda()
     model.eval()
 
-    base_learning_rate = args.lr
-    param_groups = []
-    processed_params = set()
-    for module in model.modules():
-        if isinstance(module, channelwise_relu_poly):
-            adjusted_learning_rate = base_learning_rate * module.num_channels
-            param_groups.append({'params': list(module.parameters()), 'lr': adjusted_learning_rate})
-            processed_params.update(module.parameters())
+    def find_submodule(module, submodule_name):
+        names = submodule_name.split('.')
+        for name in names:
+            module = getattr(module, name, None)
+            if module is None:
+                return None
+        return module
+
+    relu_poly_params = []
+    other_params = []
+
+    for name, param in model.named_parameters():
+        submodule_name = '.'.join(name.split('.')[:-1])
+        submodule = find_submodule(model, submodule_name)
+        
+        if isinstance(submodule, channelwise_relu_poly):
+            relu_poly_params.append(param)
         else:
-            pass
-    for param in model.parameters():
-        if param not in processed_params:
-            param_groups.append({'params': param, 'lr': base_learning_rate})
+            other_params.append(param)
+
+    optimizer_params = [
+        {'params': relu_poly_params, 'lr': 0},
+        {'params': other_params, 'lr': args.lr}
+    ]
     
+    optimizer = optim.AdamW(optimizer_params)
     # optimizer = optim.AdamW(param_groups)
     # optimizer = optim.AdamW(model.parameters(), lr = args.lr, weight_decay=args.w_decay)
-    optimizer = optim.AdamW(model.parameters(), lr = args.lr)
 
-    optimizer = Lookahead(optimizer)
+    # optimizer = Lookahead(optimizer)
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=t_max)
 
@@ -301,7 +323,7 @@ def main(args):
 
         print("mask = ", mask)
         writer.add_scalar('Mask value', mask, epoch)
-        train(model, pretrain_model, optimizer, epoch, mask)
+        train(model, model_relu, optimizer, epoch, mask)
         # scheduler.step()
         best_acc = test(model, epoch, best_acc, mask)
 
