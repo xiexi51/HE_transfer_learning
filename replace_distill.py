@@ -12,7 +12,7 @@ import time
 import ast
 import torch.nn.init as init
 from tqdm import tqdm
-from model import ResNet18Poly, pixel_relu_poly
+from model import ResNet18Poly, general_relu_poly
 from model_relu import ResNet18Relu
 import numpy as np
 import shutil
@@ -21,22 +21,34 @@ import sys
 from datetime import datetime
 from utils import *
 
-parser = argparse.ArgumentParser(description='Transfer from ImageNet pretrain to CIFAR10')
+parser = argparse.ArgumentParser(description='Fully poly replacement on ResNet for ImageNet')
 
 parser.add_argument('--id', default=0, type=int)
-parser.add_argument('--epoch', default=100, type=int)
-parser.add_argument('--lr', default=0.0001, type=float, help='learning rate')
+parser.add_argument('--total_epochs', default=100, type=int)
+parser.add_argument('--lr', default=0.0005, type=float, help='learning rate')
 parser.add_argument('--w_decay', default=0.000, type=float, help='w decay rate')
 parser.add_argument('--optim', type=str, default='adamw', choices = ['sgd', 'adamw'])
 parser.add_argument('--batch_size_train', type=int, default=500, help='Batch size for training')
 parser.add_argument('--batch_size_test', type=int, default=500, help='Batch size for testing')
-parser.add_argument('--hidden_dim', type=int, default=0, help='Hidden dimension in the classifier')
-parser.add_argument('--drop', type=float, default=0)
-parser.add_argument('--add_bias1', type=ast.literal_eval, default=False)
-parser.add_argument('--add_bias2', type=ast.literal_eval, default=False)
-parser.add_argument('--add_relu', type=ast.literal_eval, default=False)
-parser.add_argument('--unfreeze_mode', type=str, default='none', choices=['none', 'b2_conv2', 'b2'])
-parser.add_argument('--data_augment', type=ast.literal_eval, default=False)
+parser.add_argument('--data_augment', type=ast.literal_eval, default=True)
+parser.add_argument('--train_subset', type=ast.literal_eval, default=True, help='if train on the subset of ImageNet or the full ImageNet')
+parser.add_argument('--pixel_wise', type=ast.literal_eval, default=True, help='if use pixel-wise poly replacement')
+parser.add_argument('--channel_wise', type=ast.literal_eval, default=True, help='if use channel-wise relu_poly class')
+
+parser.add_argument('--poly_weight_inits', nargs=3, type=float, default=[0, 1, 0], help='relu_poly weights initial values')
+parser.add_argument('--poly_weight_factors', nargs=3, type=float, default=[1, 1, 1], help='adjust the learning rate of the three weights in relu_poly')
+
+parser.add_argument('--mask_decrease', type=str, default='1-sinx', choices = ['1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
+parser.add_argument('--mask_epochs', default=80, type=int, help='the epoch that the relu replacing mask will decrease to 0')
+
+parser.add_argument('--loss_fm_type', type=str, default='at', choices = ['at', 'mse', 'custom_mse'], help='the type for the feature map loss')
+parser.add_argument('--loss_fm_factor', default=100, type=float, help='the factor of the feature map loss, set to 0 to disable')
+parser.add_argument('--loss_ce_factor', default=1, type=float, help='the factor of the cross-entropy loss, set to 0 to disable')
+parser.add_argument('--loss_kd_factor', default=1, type=float, help='the factor of the knowledge distillation loss, set to 0 to disable')
+
+parser.add_argument('--lookahead', type=ast.literal_eval, default=True, help='if enable look ahead for the optimizer')
+parser.add_argument('--lr_anneal', type=str, default='None', choices = ['None', 'cos'])
+
 parser.add_argument('--num_workers', type=int, default=10)
 parser.add_argument('--pbar', type=ast.literal_eval, default=True)
 parser.add_argument('--log_root', type=str)
@@ -47,15 +59,24 @@ torch.cuda.manual_seed_all(10)
 
 
 def main(args):
-    t_max = args.epoch
+    t_max = args.total_epochs
     best_acc = 0  # best test accuracy
     start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-    transform_train = transforms.Compose([
-        transforms.RandomResizedCrop(224),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ])
+    
+    if args.data_augment:
+        transform_train = transforms.Compose([
+            transforms.RandomResizedCrop(224),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+            ])
+    else:
+        transform_train = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+            ])
 
     transform_test = transforms.Compose([
         transforms.Resize(256),
@@ -64,8 +85,11 @@ def main(args):
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
     
-    trainset = torchvision.datasets.ImageFolder(
-        root='/home/uconn/xiexi/poly_replace/subset2' , transform=transform_train)
+    if args.train_subset:
+        trainset = torchvision.datasets.ImageFolder(root='/home/uconn/xiexi/poly_replace/subset2' , transform=transform_train)
+    else:
+        trainset = torchvision.datasets.ImageFolder(root='/home/uconn/dataset/imagenet/train' , transform=transform_train)
+    
     trainloader = torch.utils.data.DataLoader(
         trainset, batch_size = args.batch_size_train, shuffle=True, num_workers=args.num_workers)
     testset = torchvision.datasets.ImageFolder(
@@ -73,160 +97,7 @@ def main(args):
     testloader = torch.utils.data.DataLoader(
         testset, batch_size = args.batch_size_test, shuffle=False, num_workers=args.num_workers)
 
-    current_datetime = datetime.now().strftime('%Y%m%d%H%M%S')
-    if args.log_root:
-        log_root = args.log_root
-    else:
-        log_root = 'runs' + current_datetime
-
-    log_dir = f"{log_root}/{args.id}_ep{args.epoch}_lr{args.lr}_wd{args.w_decay}_opt{args.optim}"\
-        f"_btrain{args.batch_size_train}_btest{args.batch_size_test}_hdim{args.hidden_dim}_dp{args.drop}"\
-            f"_b1{args.add_bias1}_b2{args.add_bias2}_re{args.add_relu}_unfreeze{args.unfreeze_mode}_aug{args.data_augment}"
-    
-    print("log_dir = ", log_dir)
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    current_file_name = os.path.basename(sys.argv[0])
-    new_file_name = current_file_name.replace(".py", f"_{current_datetime}.py")
-    shutil.copyfile(current_file_name, os.path.join(log_dir, new_file_name))
-    print(f"File '{current_file_name}' has been copied to '{log_dir}' as '{new_file_name}'")
-
-
-    writer = SummaryWriter(log_dir=log_dir)
-
-    print_prefix = f"{args.id} {args.epoch} {args.lr} {args.w_decay} {args.optim} {args.batch_size_train} {args.batch_size_test} "\
-        f"{args.hidden_dim} {args.drop} {args.add_bias1} {args.add_bias2} {args.add_relu} {args.unfreeze_mode} {args.data_augment}"
-
-    def accuracy(output, target, topk=(1,)):
-        """Computes the precision@k for the specified values of k"""
-        with torch.no_grad():
-            maxk = max(topk)
-            batch_size = target.size(0)
-
-            _, pred = output.topk(maxk, 1, True, True)
-            pred = pred.t()
-            correct = pred.eq(target.view(1, -1).expand_as(pred))
-
-            res = []
-            for k in topk:
-                correct_k = correct[:k].flatten().float().sum(0, keepdim=True)
-                res.append(correct_k.mul_(1.0 / batch_size))
-            return res
-    
-    def custom_mse_loss(x, y):
-        """
-        Compute the mean squared error loss.
-        When y > 0, the loss for those elements is divided by 3.
-        """
-        mse_loss = F.mse_loss(x, y, reduction='none')  # Compute element-wise MSE loss
-        adjust_factor = torch.where(y > 0, 1/3, 1.0)  # Create a factor, 1/3 where y > 0, else 1
-        adjusted_loss = mse_loss * adjust_factor  # Adjust the loss
-        return adjusted_loss.mean()  # Return the mean loss
-
-    def train(model_s, model_t, optimizer, epoch, mask):
-        # model_s.train_fz_bn()
-        model_s.train()
-        model_t.eval()
-        # model_t.train()
-
-        train_loss = 0
-        train_loss_kd = 0
-        train_loss_ce = 0
-        train_loss_fm = 0
-
-        # correct = 0
-        if args.pbar:
-            pbar = tqdm(trainloader, total=len(trainloader), desc=f"Epo {epoch} Lr {optimizer.param_groups[0]['lr']:.1e}", ncols=120)
-        else:
-            pbar = trainloader
-
-        top1_total = 0
-        top5_total = 0
-        total = 0
-        # loss_fun = nn.MSELoss()
-        loss_fun = at_loss
-        # loss_fun = custom_mse_loss
-
-        criterion_kd = SoftTarget(4.0).cuda()
-        criterion_ce = nn.CrossEntropyLoss()
-
-        for x, y in pbar:
-            x, y = x.cuda(), y.cuda()
-
-            optimizer.zero_grad()
-            with torch.no_grad():
-                out_t, fms_t = model_t.forward_with_fms(x, 0)
-            out_s, fms_s = model_s.forward_with_fms(x, mask)
-
-            loss_fm = sum(loss_fun(x, y) for x, y in zip(fms_s, fms_t)) * 100
-
-            kd_loss = criterion_kd(out_s, out_t) *1
-            ce_loss = criterion_ce(out_s, y) *1
-
-            loss = kd_loss + ce_loss + loss_fm
-            # loss = ce_loss + loss_fm
-            
-            loss.backward()
-            optimizer.step()
-            train_loss += loss.item()
-            train_loss_fm += loss_fm.item()
-            train_loss_kd += kd_loss.item()
-            train_loss_ce += ce_loss.item()
-
-
-            # correct += torch.argmax(fx, 1).eq(y).float().sum().item()
-
-            top1, top5 = accuracy(out_s, y, topk=(1, 5))
-            top1_total += top1[0] * x.size(0)
-            top5_total += top5[0] * x.size(0)
-            total += x.size(0)
-            pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e}, 1a {100*top1_total/total:.1f}, 5a {100*top5_total/total:.1f}")
-
-        train_acc = (top1_total / total).item()
-        print('Epoch', epoch, 'Training Acc:', train_acc)
-        writer.add_scalar('Accuracy/train', train_acc, epoch)
-        writer.add_scalar('Loss/train', train_loss/total, epoch)
-        writer.add_scalar('Loss_fm/train', train_loss_fm/total, epoch)
-        writer.add_scalar('Loss_kd/train', train_loss_kd/total, epoch)
-        writer.add_scalar('Loss_ce/train', train_loss_ce/total, epoch)
-        return train_acc
-            
-    def test(model, epoch, best_acc, mask):
-        model.eval()
-        # correct = 0
-        top1_total = 0
-        top5_total = 0
-        total = 0
-        if args.pbar:
-            pbar = tqdm(testloader, total=len(testloader), desc=f"Epo {epoch} Testing", ncols=100)
-        else:
-            pbar = testloader
-
-        for x, y in pbar:
-            x, y = x.cuda(), y.cuda()
-            with torch.no_grad():
-                if mask is not None:
-                    out = model(x, mask)
-                else:
-                    out = model(x)
-            top1, top5 = accuracy(out, y, topk=(1, 5))
-            top1_total += top1[0] * x.size(0)
-            top5_total += top5[0] * x.size(0)
-            total += x.size(0)
-            pbar.set_postfix_str(f"Top-1 Acc {100*top1_total/total:.2f}%, Top-5 Acc {100*top5_total/total:.2f}%")
-
-        test_acc = (top1_total / total).item()
-        writer.add_scalar('Accuracy/test', test_acc, epoch)
-
-        # Save checkpoint.
-        
-        if test_acc > best_acc:
-            best_acc = test_acc
-
-        print('Epoch', epoch, 'Test Acc:', test_acc, 'Test Best:', best_acc)
-        return best_acc
-
-    model = ResNet18Poly()
+    model = ResNet18Poly(args.channel_wise, args.pixel_wise, args.poly_weight_inits, args.poly_weight_factors, relu2_extra_factor=1)
 
     pretrain_model = torchvision.models.resnet18(pretrained=True)
 
@@ -249,6 +120,16 @@ def main(args):
         
     copy_parameters(pretrain_model, model)   
 
+    def initialize_model(model):
+        for m in model.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
+    # initialize_model(model)
+
     model_relu = ResNet18Relu()
     model_relu = model_relu.cuda()
     
@@ -264,7 +145,7 @@ def main(args):
         model = torch.nn.DataParallel(model)
         pretrain_model = torch.nn.DataParallel(pretrain_model)
 
-    pretrain_model = pretrain_model.cuda()
+    # pretrain_model = pretrain_model.cuda()
     model = model.cuda()
     model.eval()
 
@@ -283,7 +164,7 @@ def main(args):
         submodule_name = '.'.join(name.split('.')[:-1])
         submodule = find_submodule(model, submodule_name)
         
-        if isinstance(submodule, pixel_relu_poly):
+        if isinstance(submodule, general_relu_poly):
             relu_poly_params.append(param)
         else:
             other_params.append(param)
@@ -292,36 +173,175 @@ def main(args):
         {'params': relu_poly_params, 'lr': args.lr},
         {'params': other_params, 'lr': args.lr}
     ]
+
+    # i = 0
+    # for param_group in optimizer_params:
+    #     lr = param_group['lr'] 
+    #     for p in param_group['params']:
+    #         i += 1
+    #         print(f"{i} Param Name: {p.shape}, Learning Rate: {lr}")
     
     optimizer = optim.AdamW(optimizer_params)
 
     # optimizer = optim.AdamW(param_groups)
     # optimizer = optim.AdamW(model.parameters(), lr = args.lr, weight_decay=args.w_decay)
 
-    # optimizer = Lookahead(optimizer)
+    if args.lookahead:
+        optimizer = Lookahead(optimizer)
 
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=t_max)
+    if args.lr_anneal == "None":
+        lr_scheduler = None
+    elif args.lr_anneal == "cos":
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=t_max)
 
-    mask_x = np.linspace(0, np.pi / 2, 80)[1:]
-    mask_y = 1 - np.sin(mask_x)
 
-    # mask_x = np.linspace(0, 80, 80)[1:]
-    # mask_y = np.exp(-mask_x/10)
+    current_datetime = datetime.now().strftime('%Y%m%d%H%M%S')
+    if args.log_root:
+        log_root = args.log_root
+    else:
+        log_root = 'runs' + current_datetime
+
+    log_dir = log_root
+    
+    print("log_dir = ", log_dir)
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+
+    args_file = os.path.join(log_dir, "args.txt")
+    with open(args_file, 'w') as file:
+        for key, value in vars(args).items():
+            file.write(f'{key}: {value}\n')
+    print(f"Arguments saved in {args_file}")
+
+    writer = SummaryWriter(log_dir=log_dir)
+
+    values_list = [str(value) for key, value in vars(args).items()]
+    print_prefix = ' '.join(values_list)
+
+    def train(model_s, model_t, optimizer, epoch, mask):
+        # model_s.train_fz_bn()
+        model_s.train()
+        model_t.eval()
+        # model_t.train()
+
+        train_loss = 0
+        train_loss_kd = 0
+        train_loss_ce = 0
+        train_loss_fm = 0
+
+        if args.pbar:
+            pbar = tqdm(trainloader, total=len(trainloader), desc=f"Epo {epoch} Lr {optimizer.param_groups[0]['lr']:.1e}", ncols=120)
+        else:
+            pbar = trainloader
+
+        top1_total = 0
+        top5_total = 0
+        total = 0
+
+        if args.loss_fm_type == "mse":
+            loss_fm_fun = nn.MSELoss()
+        elif args.loss_fm_type == "custom_mse":
+            loss_fm_fun = custom_mse_loss
+        else:
+            loss_fm_fun = at_loss
+
+        criterion_kd = SoftTarget(4.0).cuda()
+        criterion_ce = nn.CrossEntropyLoss()
+
+        for x, y in pbar:
+            x, y = x.cuda(), y.cuda()
+
+            optimizer.zero_grad()
+            with torch.no_grad():
+                out_t, fms_t = model_t.forward_with_fms(x, 0)
+            out_s, fms_s = model_s.forward_with_fms(x, mask)
+
+            loss_fm = sum(loss_fm_fun(x, y) for x, y in zip(fms_s, fms_t))
+
+            loss_kd = criterion_kd(out_s, out_t) 
+            loss_ce = criterion_ce(out_s, y) 
+
+            loss = 0
+            if args.loss_fm_factor > 0:
+                loss += loss_fm * args.loss_fm_factor
+            if args.loss_kd_factor > 0:
+                loss += loss_kd * args.loss_kd_factor
+            if args.loss_ce_factor > 0:
+                loss += loss_ce * args.loss_ce_factor
+            
+            loss.backward()
+            optimizer.step()
+            train_loss += loss.item()
+            train_loss_fm += loss_fm.item()
+            train_loss_kd += loss_kd.item()
+            train_loss_ce += loss_kd.item()
+
+            top1, top5 = accuracy(out_s, y, topk=(1, 5))
+            top1_total += top1[0] * x.size(0)
+            top5_total += top5[0] * x.size(0)
+            total += x.size(0)
+            pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e}, 1a {100*top1_total/total:.1f}, 5a {100*top5_total/total:.1f}")
+
+        train_acc = (top1_total / total).item()
+        # print('Epoch', epoch, 'Training Acc:', train_acc*100)
+        writer.add_scalar('Accuracy/train', train_acc, epoch)
+        writer.add_scalar('Loss/train', train_loss/total, epoch)
+        writer.add_scalar('Loss_fm/train', train_loss_fm/total, epoch)
+        writer.add_scalar('Loss_kd/train', train_loss_kd/total, epoch)
+        writer.add_scalar('Loss_ce/train', train_loss_ce/total, epoch)
+        return train_acc
+            
+    def test(model, epoch, best_acc, mask):
+        model.eval()
+        top1_total = 0
+        top5_total = 0
+        total = 0
+        if args.pbar:
+            pbar = tqdm(testloader, total=len(testloader), desc=f"Epo {epoch} Testing", ncols=100)
+        else:
+            pbar = testloader
+
+        for x, y in pbar:
+            x, y = x.cuda(), y.cuda()
+            with torch.no_grad():
+                if mask is not None:
+                    out = model(x, mask)
+                else:
+                    out = model(x)
+            top1, top5 = accuracy(out, y, topk=(1, 5))
+            top1_total += top1[0] * x.size(0)
+            top5_total += top5[0] * x.size(0)
+            total += x.size(0)
+            pbar.set_postfix_str(f"1a {100*top1_total/total:.2f}, 5a {100*top5_total/total:.2f}, best {100*best_acc:.2f}")
+
+        test_acc = (top1_total / total).item()
+        writer.add_scalar('Accuracy/test', test_acc, epoch)
+        
+        if test_acc > best_acc:
+            best_acc = test_acc
+
+        return best_acc
+
+    if args.mask_decrease == "1-sinx":
+        mask_x = np.linspace(0, np.pi / 2, args.mask_epochs)[1:]
+        mask_y = 1 - np.sin(mask_x)
+    elif args.mask_decrease == "e^(-x/10)":
+        mask_x = np.linspace(0, 80, args.mask_epochs)[1:]
+        mask_y = np.exp(-mask_x / 10)
+    else:  # linear decrease
+        mask_y = np.linspace(1, 0, args.mask_epochs)[1:]
+
 
     for epoch in range(start_epoch, start_epoch + t_max):
-        # mask = torch.tensor(1 - epoch / (start_epoch + t_max), dtype=torch.float).cuda()
-        # mask = 1 - ((epoch + 1) / (start_epoch + 80))
-
-        if epoch <= 78:
-            mask = mask_y[epoch]
+        if epoch < start_epoch + args.mask_epochs:
+            mask = mask_y[epoch - start_epoch]
         else:
             mask = 0
-
-        # mask = 0
         if mask < 0:
             mask = 0
 
         # mask = 1
+        # mask = 0
 
         print("mask = ", mask)
         writer.add_scalar('Mask value', mask, epoch)
@@ -329,8 +349,11 @@ def main(args):
             total_elements, relu_elements = model.get_relu_density(mask)
             print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
         train_acc = train(model, model_relu, optimizer, epoch, mask)
-        # scheduler.step()
-        if train_acc < 0.6:
+
+        if lr_scheduler is not None:
+            lr_scheduler.step()
+        # if train_acc > 0.5:
+        if mask < 0.01:
             best_acc = test(model, epoch, best_acc, mask)
 
         # Save the model after each epoch

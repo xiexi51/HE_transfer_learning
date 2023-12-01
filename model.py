@@ -2,66 +2,53 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class relu_poly(nn.Module):
-    def __init__(self, factor1 = 1, factor2 = 1, factor3 = 1):
-        super(relu_poly, self).__init__()
-        self.weight = torch.nn.Parameter(torch.FloatTensor([0.14, 0.5, 0.28]), requires_grad=True)
-        self.factor1 = factor1
-        self.factor2 = factor2
-        self.factor3 = factor3
-
-    def forward(self, input, mask):
-        y = self.weight[0]*torch.mul(input, input)*self.factor1 + self.weight[1]*input*self.factor2 + self.weight[2]*self.factor3
-        y = F.relu(input) * mask + y * (1 - mask)
-        # print()
-        # print(self.weight[0].detach(), self.weight[1].detach(), self.bias.detach())
-        return y
-
-class channelwise_relu_poly(nn.Module):
-    def __init__(self, num_channels, factor1=1, factor2=1, factor3=0):
-        super(channelwise_relu_poly, self).__init__()
-        initial_weights = torch.zeros(num_channels, 2)
-        initial_weights[:, 0] = 0
-        initial_weights[:, 1] = 1  
-        self.weight = nn.Parameter(initial_weights, requires_grad=True)
-        self.factor1 = factor1
-        self.factor2 = factor2
-        self.factor3 = factor3
+class general_relu_poly(nn.Module):
+    def __init__(self, if_channel, if_pixel, weight_inits, factors, num_channels):
+        super(general_relu_poly, self).__init__()
+        self.if_channel = if_channel
+        self.if_pixel = if_pixel
+        self.factors = factors
         self.num_channels = num_channels
-
-    def forward(self, input, mask):
-        weights = self.weight.unsqueeze(-1).unsqueeze(-1)
-        weights = weights.expand(-1, -1, input.size(2), input.size(3))
-
-        square_term = weights[:, 0, :, :] * torch.mul(input, input) * self.factor1
-        linear_term = weights[:, 1, :, :] * input * self.factor2
-        # constant_term = weights[:, 2, :, :] * self.factor3
-
-        # y = square_term + linear_term + constant_term
-        y = square_term + linear_term
-        y = F.relu(input) * mask + y * (1 - mask)
-        return y
-    
-class pixel_relu_poly(nn.Module):
-    def __init__(self, factor1 = 0.01, factor2 = 1, factor3 = 0.01):
-        super(pixel_relu_poly, self).__init__()
-        self.weight = torch.nn.Parameter(torch.FloatTensor([0, 1, 0]), requires_grad=True)
-        self.factor1 = factor1
-        self.factor2 = factor2
-        self.factor3 = factor3
         self.rand_mask = None
 
+        if len(weight_inits) != 3:
+            raise ValueError("weight_inits must be of length 3")
+        if len(factors) != 3:
+            raise ValueError("factors must be of length 3")
+        if if_channel:
+            initial_weights = torch.zeros(num_channels, 3)
+            for i, weight_init in enumerate(weight_inits):
+                initial_weights[:, i] = weight_init  
+            self.weight = nn.Parameter(initial_weights, requires_grad=True)
+        else:
+            self.weight = nn.Parameter(torch.FloatTensor(weight_inits), requires_grad=True)
+    
     def forward(self, input, mask):
-        if self.rand_mask is None or self.rand_mask.shape != input.shape[1:]:
-            self.rand_mask = torch.rand(input.shape[1:], device=input.device)
+        if self.if_channel:
+            weights = self.weight.unsqueeze(-1).unsqueeze(-1)
+            weights = weights.expand(-1, -1, input.size(2), input.size(3))
+            # square_term = weights[:, 0, :, :] * torch.mul(input, input) * self.factors[0]
+            # linear_term = weights[:, 1, :, :] * input * self.factors[1]
+            # constant_term = weights[:, 2, :, :] * self.factors[2]
+            y = (weights[:, 0, :, :] * self.factors[0] * input + weights[:, 1, :, :] * self.factors[1]) * input + weights[:, 2, :, :] * self.factors[2]
+            
+        else:
+            y = (self.weight[0] * self.factors[0] * input + self.weight[1] * self.factors[1]) * input + self.weight[2] * self.factors[2]
 
-        if_relu = mask > self.rand_mask
-        y = self.weight[0] * torch.mul(input, input) * self.factor1 + self.weight[1] * input * self.factor2 + self.weight[2] * self.factor3
-        y = F.relu(input) * if_relu.float() + y * (1 - if_relu.float())
-        
+        if self.if_pixel:
+            if self.rand_mask is None:
+                self.rand_mask = torch.rand(input.shape[1:], device=input.device)
+            if_relu = mask > self.rand_mask
+            y = F.relu(input) * if_relu.float() + y * (1 - if_relu.float())
+        else:
+            y = F.relu(input) * mask + y * (1 - mask)
+
         return y
     
     def get_relu_density(self, mask):
+        if not self.if_pixel:
+            raise ValueError("get_relu_density can only be called when if_pixel is True")
+    
         if_relu = mask > self.rand_mask
         total_elements = self.rand_mask.numel()
         relu_elements = if_relu.sum().item()
@@ -71,7 +58,7 @@ class pixel_relu_poly(nn.Module):
 class BasicBlockPoly(nn.Module):
     expansion = 1
 
-    def __init__(self, in_planes, planes, stride=1, poly_square_factor=1):
+    def __init__(self, in_planes, planes, stride, if_channel, if_pixel, weight_inits, factors, relu2_extra_factor=1):
         super(BasicBlockPoly, self).__init__()
         self.conv1 = nn.Conv2d(
             in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
@@ -88,10 +75,10 @@ class BasicBlockPoly(nn.Module):
                 nn.BatchNorm2d(self.expansion*planes)
             )
 
-        # self.relu1 = channelwise_relu_poly(planes)
-        # self.relu2 = channelwise_relu_poly(planes, factor1=poly_square_factor)
-        self.relu1 = pixel_relu_poly()
-        self.relu2 = pixel_relu_poly()
+        self.relu1 = general_relu_poly(if_channel, if_pixel, weight_inits, factors, planes)
+        relu2_factors = factors
+        relu2_factors[0] = factors[0] * relu2_extra_factor
+        self.relu2 = general_relu_poly(if_channel, if_pixel, weight_inits, relu2_factors, planes)
 
     def forward(self, x, mask):
         out = self.relu1(self.bn1(self.conv1(x)), mask)
@@ -117,9 +104,15 @@ class BasicBlockPoly(nn.Module):
 
 
 class ResNetPoly(nn.Module):
-    def __init__(self, block, num_blocks, num_classes=10):
+    def __init__(self, block, num_blocks, num_classes, if_channel, if_pixel, poly_weight_inits, poly_factors, relu2_extra_factor):
         super(ResNetPoly, self).__init__()
         self.in_planes = 64
+
+        self.if_channel = if_channel
+        self.if_pixel = if_pixel
+        self.poly_weight_inits = poly_weight_inits
+        self.poly_factors = poly_factors
+        self.relu2_extra_factor = relu2_extra_factor
 
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
@@ -132,17 +125,16 @@ class ResNetPoly(nn.Module):
 
         self.linear = nn.Linear(512*block.expansion, num_classes)
 
-        # self.relu1 = channelwise_relu_poly(64)
-        self.relu1 = pixel_relu_poly()
+        self.relu1 = general_relu_poly(if_channel, if_pixel, poly_weight_inits, poly_factors, 64)
 
     def _create_blocks(self, block, planes, num_blocks, stride):
         strides = [stride] + [1]*(num_blocks-1)
         blocks = []
         for stride in strides:
             if planes == 512 and stride == 1:
-                blocks.append(block(self.in_planes, planes, stride, poly_square_factor = 0.2))
+                blocks.append(block(self.in_planes, planes, stride, self.if_channel, self.if_pixel, self.poly_weight_inits, self.poly_factors, self.relu2_extra_factor))
             else:
-                blocks.append(block(self.in_planes, planes, stride))
+                blocks.append(block(self.in_planes, planes, stride, self.if_channel, self.if_pixel, self.poly_weight_inits, self.poly_factors))
 
             self.in_planes = planes * block.expansion
         return blocks
@@ -272,6 +264,5 @@ class ResNetPoly(nn.Module):
 
         return total_sum, relu_sum
         
-
-def ResNet18Poly():
-    return ResNetPoly(BasicBlockPoly, [2, 2, 2, 2], 1000)
+def ResNet18Poly(if_channel, if_pixel, poly_weight_inits, poly_factors, relu2_extra_factor=1):
+    return ResNetPoly(BasicBlockPoly, [2, 2, 2, 2], 1000, if_channel, if_pixel, poly_weight_inits, poly_factors, relu2_extra_factor)

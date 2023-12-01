@@ -97,3 +97,29 @@ class STEFunction(torch.autograd.Function):
     def backward(ctx, grad_output):
         input, = ctx.saved_tensors
         return torch.mul(F.softplus(input), grad_output)
+
+def accuracy(output, target, topk=(1,)):
+        """Computes the precision@k for the specified values of k"""
+        with torch.no_grad():
+            maxk = max(topk)
+            batch_size = target.size(0)
+
+            _, pred = output.topk(maxk, 1, True, True)
+            pred = pred.t()
+            correct = pred.eq(target.view(1, -1).expand_as(pred))
+
+            res = []
+            for k in topk:
+                correct_k = correct[:k].flatten().float().sum(0, keepdim=True)
+                res.append(correct_k.mul_(1.0 / batch_size))
+            return res
+    
+def custom_mse_loss(x, y):
+    """
+    Compute the mean squared error loss.
+    When y > 0, the loss for those elements is divided by 3.
+    """
+    mse_loss = F.mse_loss(x, y, reduction='none')  # Compute element-wise MSE loss
+    adjust_factor = torch.where(y > 0, 1/3, 1.0)  # Create a factor, 1/3 where y > 0, else 1
+    adjusted_loss = mse_loss * adjust_factor  # Adjust the loss
+    return adjusted_loss.mean()  # Return the mean loss
