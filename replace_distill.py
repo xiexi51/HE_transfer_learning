@@ -24,6 +24,7 @@ from utils import *
 parser = argparse.ArgumentParser(description='Fully poly replacement on ResNet for ImageNet')
 
 parser.add_argument('--id', default=0, type=int)
+
 parser.add_argument('--total_epochs', default=100, type=int)
 parser.add_argument('--lr', default=0.0005, type=float, help='learning rate')
 parser.add_argument('--w_decay', default=0.000, type=float, help='w decay rate')
@@ -31,23 +32,21 @@ parser.add_argument('--optim', type=str, default='adamw', choices = ['sgd', 'ada
 parser.add_argument('--batch_size_train', type=int, default=500, help='Batch size for training')
 parser.add_argument('--batch_size_test', type=int, default=500, help='Batch size for testing')
 parser.add_argument('--data_augment', type=ast.literal_eval, default=True)
-parser.add_argument('--train_subset', type=ast.literal_eval, default=True, help='if train on the subset of ImageNet or the full ImageNet')
+parser.add_argument('--train_subset', type=ast.literal_eval, default=True, help='if train on the 1/13 subset of ImageNet or the full ImageNet')
 parser.add_argument('--pixel_wise', type=ast.literal_eval, default=True, help='if use pixel-wise poly replacement')
 parser.add_argument('--channel_wise', type=ast.literal_eval, default=True, help='if use channel-wise relu_poly class')
-
 parser.add_argument('--poly_weight_inits', nargs=3, type=float, default=[0, 1, 0], help='relu_poly weights initial values')
-parser.add_argument('--poly_weight_factors', nargs=3, type=float, default=[1, 1, 1], help='adjust the learning rate of the three weights in relu_poly')
-
-parser.add_argument('--mask_decrease', type=str, default='1-sinx', choices = ['1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
+parser.add_argument('--poly_weight_factors', nargs=3, type=float, default=[0.1, 1, 0.1], help='adjust the learning rate of the three weights in relu_poly')
+parser.add_argument('--mask_decrease', type=str, default='e^(-x/10)', choices = ['1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
 parser.add_argument('--mask_epochs', default=80, type=int, help='the epoch that the relu replacing mask will decrease to 0')
-
 parser.add_argument('--loss_fm_type', type=str, default='at', choices = ['at', 'mse', 'custom_mse'], help='the type for the feature map loss')
 parser.add_argument('--loss_fm_factor', default=100, type=float, help='the factor of the feature map loss, set to 0 to disable')
 parser.add_argument('--loss_ce_factor', default=1, type=float, help='the factor of the cross-entropy loss, set to 0 to disable')
 parser.add_argument('--loss_kd_factor', default=1, type=float, help='the factor of the knowledge distillation loss, set to 0 to disable')
-
-parser.add_argument('--lookahead', type=ast.literal_eval, default=True, help='if enable look ahead for the optimizer')
+parser.add_argument('--lookahead', type=ast.literal_eval, default=False, help='if enable look ahead for the optimizer')
 parser.add_argument('--lr_anneal', type=str, default='None', choices = ['None', 'cos'])
+parser.add_argument('--bf16', type=ast.literal_eval, default=False, help='if enable training with bf16 precision')
+parser.add_argument('--fp16', type=ast.literal_eval, default=False, help='if enable training with float16 precision')
 
 parser.add_argument('--num_workers', type=int, default=10)
 parser.add_argument('--pbar', type=ast.literal_eval, default=True)
@@ -62,6 +61,18 @@ def main(args):
     t_max = args.total_epochs
     best_acc = 0  # best test accuracy
     start_epoch = 0  # start from epoch 0 or last checkpoint epoch
+
+    if args.bf16 or args.fp16:
+        if args.bf16:
+            raise NotImplementedError("BF16 support is not yet available.")
+        if args.fp16:
+            print("FP16 enabled.")
+
+    if args.bf16 or args.fp16:
+        if args.bf16:
+            print("enable bf16")
+        if args.fp16:
+            print("enable fp16")
     
     if args.data_augment:
         transform_train = transforms.Compose([
@@ -131,7 +142,6 @@ def main(args):
     # initialize_model(model)
 
     model_relu = ResNet18Relu()
-    model_relu = model_relu.cuda()
     
     copy_parameters(pretrain_model, model_relu)   
     
@@ -146,8 +156,21 @@ def main(args):
         pretrain_model = torch.nn.DataParallel(pretrain_model)
 
     # pretrain_model = pretrain_model.cuda()
+    
     model = model.cuda()
     model.eval()
+
+    model_relu = model_relu.cuda()
+
+    def convert_to_bf16_except_bn(model):
+        for module in model.modules():
+            if not isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+                module.to(dtype=torch.bfloat16)
+        return model
+
+    if args.bf16:
+        model = convert_to_bf16_except_bn(model)
+        model_relu = convert_to_bf16_except_bn(model_relu)
 
     def find_submodule(module, submodule_name):
         names = submodule_name.split('.')
@@ -193,6 +216,8 @@ def main(args):
         lr_scheduler = None
     elif args.lr_anneal == "cos":
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=t_max)
+
+    scaler = torch.cuda.amp.GradScaler(enabled=args.bf16 or args.fp16)
 
 
     current_datetime = datetime.now().strftime('%Y%m%d%H%M%S')
@@ -251,26 +276,36 @@ def main(args):
         for x, y in pbar:
             x, y = x.cuda(), y.cuda()
 
+            if args.bf16:
+                x = x.to(dtype=torch.bfloat16)
+
             optimizer.zero_grad()
-            with torch.no_grad():
-                out_t, fms_t = model_t.forward_with_fms(x, 0)
-            out_s, fms_s = model_s.forward_with_fms(x, mask)
 
-            loss_fm = sum(loss_fm_fun(x, y) for x, y in zip(fms_s, fms_t))
+            with torch.cuda.amp.autocast(enabled=args.bf16 or args.fp16):
+                with torch.no_grad():
+                    out_t, fms_t = model_t.forward_with_fms(x, 0)
+                out_s, fms_s = model_s.forward_with_fms(x, mask)
 
-            loss_kd = criterion_kd(out_s, out_t) 
-            loss_ce = criterion_ce(out_s, y) 
+                loss_fm = sum(loss_fm_fun(x, y) for x, y in zip(fms_s, fms_t))
 
-            loss = 0
-            if args.loss_fm_factor > 0:
-                loss += loss_fm * args.loss_fm_factor
-            if args.loss_kd_factor > 0:
-                loss += loss_kd * args.loss_kd_factor
-            if args.loss_ce_factor > 0:
-                loss += loss_ce * args.loss_ce_factor
+                loss_kd = criterion_kd(out_s, out_t) 
+                loss_ce = criterion_ce(out_s, y) 
+
+                loss = 0
+                if args.loss_fm_factor > 0:
+                    loss += loss_fm * args.loss_fm_factor
+                if args.loss_kd_factor > 0:
+                    loss += loss_kd * args.loss_kd_factor
+                if args.loss_ce_factor > 0:
+                    loss += loss_ce * args.loss_ce_factor
             
-            loss.backward()
-            optimizer.step()
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+
+            # if args.lookahead:
+            #     optimizer.sync_lookahead()
+            
             train_loss += loss.item()
             train_loss_fm += loss_fm.item()
             train_loss_kd += loss_kd.item()
@@ -333,7 +368,7 @@ def main(args):
 
 
     for epoch in range(start_epoch, start_epoch + t_max):
-        if epoch < start_epoch + args.mask_epochs:
+        if epoch < start_epoch + args.mask_epochs - 1:
             mask = mask_y[epoch - start_epoch]
         else:
             mask = 0
