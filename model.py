@@ -37,7 +37,7 @@ class general_relu_poly(nn.Module):
 
         if self.if_pixel:
             if self.rand_mask is None:
-                self.rand_mask = torch.rand(input.shape[1:], device=input.device)
+                self.rand_mask = nn.Parameter(torch.rand(input.shape[1:], device=input.device), requires_grad=False)
             if_relu = mask > self.rand_mask
             y = F.relu(input) * if_relu.float() + y * (1 - if_relu.float())
         else:
@@ -266,3 +266,43 @@ class ResNetPoly(nn.Module):
         
 def ResNet18Poly(if_channel, if_pixel, poly_weight_inits, poly_factors, relu2_extra_factor=1):
     return ResNetPoly(BasicBlockPoly, [2, 2, 2, 2], 1000, if_channel, if_pixel, poly_weight_inits, poly_factors, relu2_extra_factor)
+
+
+def initialize_resnet(model):
+    for m in model.modules():
+        if isinstance(m, nn.Conv2d):
+            nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+        elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+            nn.init.constant_(m.weight, 1)
+            nn.init.constant_(m.bias, 0)
+
+def convert_to_bf16_except_bn(model):
+    for module in model.modules():
+        if not isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+            module.to(dtype=torch.bfloat16)
+    return model
+
+def find_submodule(module, submodule_name):
+    names = submodule_name.split('.')
+    for name in names:
+        module = getattr(module, name, None)
+        if module is None:
+            return None
+    return module
+
+def copy_parameters(model1, model2):
+    for name1 in model1.state_dict():
+        param1 = model1.state_dict()[name1]
+        if not isinstance(param1, torch.Tensor):
+            continue
+        if name1.startswith("layer"):
+            name2 = name1[:6] + "_" + name1[7:]
+        elif name1.startswith("fc"):
+            name2 = name1.replace("fc", "linear", 1)
+        else:
+            name2 = name1
+        
+        name2 = name2.replace("downsample", "shortcut", 1)
+
+        assert(name2 in model2.state_dict())    
+        model2.state_dict()[name2].copy_(param1.data)

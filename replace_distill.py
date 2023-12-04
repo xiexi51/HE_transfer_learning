@@ -1,25 +1,18 @@
 import os
 import torch
-import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
-import torch.backends.cudnn as cudnn
 import torchvision
 import torchvision.transforms as transforms
 import argparse
 from torch.utils.tensorboard import SummaryWriter
-import time
 import ast
-import torch.nn.init as init
-from tqdm import tqdm
-from model import ResNet18Poly, general_relu_poly
+from model import ResNet18Poly, general_relu_poly, convert_to_bf16_except_bn, find_submodule, copy_parameters
 from model_relu import ResNet18Relu
 import numpy as np
-import shutil
-import sys
-
+import re
+from training import train, test, MaskProvider
+from utils import Lookahead
 from datetime import datetime
-from utils import *
 
 parser = argparse.ArgumentParser(description='Fully poly replacement on ResNet for ImageNet')
 
@@ -43,7 +36,7 @@ parser.add_argument('--loss_fm_type', type=str, default='at', choices = ['at', '
 parser.add_argument('--loss_fm_factor', default=100, type=float, help='the factor of the feature map loss, set to 0 to disable')
 parser.add_argument('--loss_ce_factor', default=1, type=float, help='the factor of the cross-entropy loss, set to 0 to disable')
 parser.add_argument('--loss_kd_factor', default=1, type=float, help='the factor of the knowledge distillation loss, set to 0 to disable')
-parser.add_argument('--lookahead', type=ast.literal_eval, default=False, help='if enable look ahead for the optimizer')
+parser.add_argument('--lookahead', type=ast.literal_eval, default=True, help='if enable look ahead for the optimizer')
 parser.add_argument('--lr_anneal', type=str, default='None', choices = ['None', 'cos'])
 parser.add_argument('--bf16', type=ast.literal_eval, default=False, help='if enable training with bf16 precision')
 parser.add_argument('--fp16', type=ast.literal_eval, default=False, help='if enable training with float16 precision')
@@ -51,16 +44,38 @@ parser.add_argument('--fp16', type=ast.literal_eval, default=False, help='if ena
 parser.add_argument('--num_workers', type=int, default=10)
 parser.add_argument('--pbar', type=ast.literal_eval, default=True)
 parser.add_argument('--log_root', type=str)
+
+parser.add_argument('--resume', type=ast.literal_eval, default=False)
+parser.add_argument('--resume_dir', type=str)
+parser.add_argument('--resume_epoch', type=int, default=None)
+
 args = parser.parse_args()
 
 torch.manual_seed(10)
 torch.cuda.manual_seed_all(10)
 
+def parse_args_line(line):
+    key, value = line.split(": ", 1)
+    try:
+        value = ast.literal_eval(value)
+    except (ValueError, SyntaxError):
+        pass
+    return key, value
+
+if args.resume:
+    args_file = args.resume_dir + '/args.txt'
+    with open(args_file, 'r') as file:
+        for line in file:
+            key, value = parse_args_line(line.strip())
+            if hasattr(args, key) and not key.startswith('resume'):
+                setattr(args, key, value)
 
 def main(args):
     t_max = args.total_epochs
     best_acc = 0  # best test accuracy
     start_epoch = 0  # start from epoch 0 or last checkpoint epoch
+
+    mask_provider = MaskProvider(args.mask_decrease, args.mask_epochs)
 
     if args.bf16 or args.fp16:
         if args.bf16:
@@ -110,36 +125,52 @@ def main(args):
 
     model = ResNet18Poly(args.channel_wise, args.pixel_wise, args.poly_weight_inits, args.poly_weight_factors, relu2_extra_factor=1)
 
+    dummy_input = torch.rand(1, 3, 224, 224) 
+    model(dummy_input, 0)
+
     pretrain_model = torchvision.models.resnet18(pretrained=True)
 
-    def copy_parameters(model1, model2):
-        for name1 in model1.state_dict():
-            param1 = model1.state_dict()[name1]
-            if not isinstance(param1, torch.Tensor):
-                continue
-            if name1.startswith("layer"):
-                name2 = name1[:6] + "_" + name1[7:]
-            elif name1.startswith("fc"):
-                name2 = name1.replace("fc", "linear", 1)
-            else:
-                name2 = name1
-            
-            name2 = name2.replace("downsample", "shortcut", 1)
+    def find_latest_epoch(resume_dir):
+        max_epoch = -1
+        for filename in os.listdir(resume_dir):
+            match = re.match(r'model_epoch_(\d+)\.pth', filename)
+            if match:
+                epoch = int(match.group(1))
+                if epoch > max_epoch:
+                    max_epoch = epoch
+        return max_epoch
 
-            assert(name2 in model2.state_dict())    
-            model2.state_dict()[name2].copy_(param1.data)
-        
-    copy_parameters(pretrain_model, model)   
+    if args.resume:
+        if args.resume_epoch is None:
+            start_epoch = find_latest_epoch(args.resume_dir) + 1
+        else:
+            start_epoch = args.resume_epoch
+        t_max = args.total_epochs - start_epoch
+        checkpoint_path = os.path.join(args.resume_dir, f'model_epoch_{start_epoch - 1}.pth')
+        if checkpoint_path and os.path.exists(checkpoint_path):
+            print(f"Loading checkpoint: {checkpoint_path}")
+            state_dict = torch.load(checkpoint_path)
+            model.load_state_dict(state_dict)
+        else:
+            print(f"No checkpoint found at {checkpoint_path}")
+    else:
+        copy_parameters(pretrain_model, model)  
 
-    def initialize_model(model):
-        for m in model.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
+    # model = model.cuda()
 
-    # initialize_model(model)
+    # writer = SummaryWriter(log_dir=args.resume_dir)
+
+    # # test(args, testloader, model, 80, 0, 0, writer)
+    
+    # mask_x = np.linspace(0, 80, args.mask_epochs)[1:]
+    # mask_y = np.exp(-mask_x / 10)
+    
+    # for epoch in range(22, 100):
+    #     mask = mask_y[epoch - 0]
+    #     model.load_state_dict(torch.load(os.path.join(args.resume_dir, f'model_epoch_{epoch}.pth')))
+    #     test(args, testloader, model, epoch, 0, mask, writer)
+
+    # initialize_resnet(model)
 
     model_relu = ResNet18Relu()
     
@@ -162,23 +193,9 @@ def main(args):
 
     model_relu = model_relu.cuda()
 
-    def convert_to_bf16_except_bn(model):
-        for module in model.modules():
-            if not isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
-                module.to(dtype=torch.bfloat16)
-        return model
-
     if args.bf16:
         model = convert_to_bf16_except_bn(model)
         model_relu = convert_to_bf16_except_bn(model_relu)
-
-    def find_submodule(module, submodule_name):
-        names = submodule_name.split('.')
-        for name in names:
-            module = getattr(module, name, None)
-            if module is None:
-                return None
-        return module
 
     relu_poly_params = []
     other_params = []
@@ -212,19 +229,21 @@ def main(args):
     if args.lookahead:
         optimizer = Lookahead(optimizer)
 
-    if args.lr_anneal == "None":
+    if args.lr_anneal is None or args.lr_anneal == "None":
         lr_scheduler = None
     elif args.lr_anneal == "cos":
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=t_max)
 
     scaler = torch.cuda.amp.GradScaler(enabled=args.bf16 or args.fp16)
 
-
-    current_datetime = datetime.now().strftime('%Y%m%d%H%M%S')
-    if args.log_root:
-        log_root = args.log_root
+    if args.resume and args.resume_dir:
+        log_root = args.resume_dir
     else:
-        log_root = 'runs' + current_datetime
+        current_datetime = datetime.now().strftime('%Y%m%d%H%M%S')
+        if args.log_root:
+            log_root = args.log_root
+        else:
+            log_root = 'runs' + current_datetime
 
     log_dir = log_root
     
@@ -243,153 +262,23 @@ def main(args):
     values_list = [str(value) for key, value in vars(args).items()]
     print_prefix = ' '.join(values_list)
 
-    def train(model_s, model_t, optimizer, epoch, mask):
-        # model_s.train_fz_bn()
-        model_s.train()
-        model_t.eval()
-        # model_t.train()
-
-        train_loss = 0
-        train_loss_kd = 0
-        train_loss_ce = 0
-        train_loss_fm = 0
-
-        if args.pbar:
-            pbar = tqdm(trainloader, total=len(trainloader), desc=f"Epo {epoch} Lr {optimizer.param_groups[0]['lr']:.1e}", ncols=120)
-        else:
-            pbar = trainloader
-
-        top1_total = 0
-        top5_total = 0
-        total = 0
-
-        if args.loss_fm_type == "mse":
-            loss_fm_fun = nn.MSELoss()
-        elif args.loss_fm_type == "custom_mse":
-            loss_fm_fun = custom_mse_loss
-        else:
-            loss_fm_fun = at_loss
-
-        criterion_kd = SoftTarget(4.0).cuda()
-        criterion_ce = nn.CrossEntropyLoss()
-
-        for x, y in pbar:
-            x, y = x.cuda(), y.cuda()
-
-            if args.bf16:
-                x = x.to(dtype=torch.bfloat16)
-
-            optimizer.zero_grad()
-
-            with torch.cuda.amp.autocast(enabled=args.bf16 or args.fp16):
-                with torch.no_grad():
-                    out_t, fms_t = model_t.forward_with_fms(x, 0)
-                out_s, fms_s = model_s.forward_with_fms(x, mask)
-
-                loss_fm = sum(loss_fm_fun(x, y) for x, y in zip(fms_s, fms_t))
-
-                loss_kd = criterion_kd(out_s, out_t) 
-                loss_ce = criterion_ce(out_s, y) 
-
-                loss = 0
-                if args.loss_fm_factor > 0:
-                    loss += loss_fm * args.loss_fm_factor
-                if args.loss_kd_factor > 0:
-                    loss += loss_kd * args.loss_kd_factor
-                if args.loss_ce_factor > 0:
-                    loss += loss_ce * args.loss_ce_factor
-            
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-
-            # if args.lookahead:
-            #     optimizer.sync_lookahead()
-            
-            train_loss += loss.item()
-            train_loss_fm += loss_fm.item()
-            train_loss_kd += loss_kd.item()
-            train_loss_ce += loss_kd.item()
-
-            top1, top5 = accuracy(out_s, y, topk=(1, 5))
-            top1_total += top1[0] * x.size(0)
-            top5_total += top5[0] * x.size(0)
-            total += x.size(0)
-            pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e}, 1a {100*top1_total/total:.1f}, 5a {100*top5_total/total:.1f}")
-
-        train_acc = (top1_total / total).item()
-        # print('Epoch', epoch, 'Training Acc:', train_acc*100)
-        writer.add_scalar('Accuracy/train', train_acc, epoch)
-        writer.add_scalar('Loss/train', train_loss/total, epoch)
-        writer.add_scalar('Loss_fm/train', train_loss_fm/total, epoch)
-        writer.add_scalar('Loss_kd/train', train_loss_kd/total, epoch)
-        writer.add_scalar('Loss_ce/train', train_loss_ce/total, epoch)
-        return train_acc
-            
-    def test(model, epoch, best_acc, mask):
-        model.eval()
-        top1_total = 0
-        top5_total = 0
-        total = 0
-        if args.pbar:
-            pbar = tqdm(testloader, total=len(testloader), desc=f"Epo {epoch} Testing", ncols=100)
-        else:
-            pbar = testloader
-
-        for x, y in pbar:
-            x, y = x.cuda(), y.cuda()
-            with torch.no_grad():
-                if mask is not None:
-                    out = model(x, mask)
-                else:
-                    out = model(x)
-            top1, top5 = accuracy(out, y, topk=(1, 5))
-            top1_total += top1[0] * x.size(0)
-            top5_total += top5[0] * x.size(0)
-            total += x.size(0)
-            pbar.set_postfix_str(f"1a {100*top1_total/total:.2f}, 5a {100*top5_total/total:.2f}, best {100*best_acc:.2f}")
-
-        test_acc = (top1_total / total).item()
-        writer.add_scalar('Accuracy/test', test_acc, epoch)
-        
-        if test_acc > best_acc:
-            best_acc = test_acc
-
-        return best_acc
-
-    if args.mask_decrease == "1-sinx":
-        mask_x = np.linspace(0, np.pi / 2, args.mask_epochs)[1:]
-        mask_y = 1 - np.sin(mask_x)
-    elif args.mask_decrease == "e^(-x/10)":
-        mask_x = np.linspace(0, 80, args.mask_epochs)[1:]
-        mask_y = np.exp(-mask_x / 10)
-    else:  # linear decrease
-        mask_y = np.linspace(1, 0, args.mask_epochs)[1:]
-
-
     for epoch in range(start_epoch, start_epoch + t_max):
-        if epoch < start_epoch + args.mask_epochs - 1:
-            mask = mask_y[epoch - start_epoch]
-        else:
-            mask = 0
-        if mask < 0:
-            mask = 0
-
+        mask = mask_provider.get_mask(epoch)
         # mask = 1
         # mask = 0
 
         print("mask = ", mask)
         writer.add_scalar('Mask value', mask, epoch)
-        if epoch >= 1:
+        if args.pixel_wise:
             total_elements, relu_elements = model.get_relu_density(mask)
             print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
-        train_acc = train(model, model_relu, optimizer, epoch, mask)
+        train_acc = train(args, trainloader, model, model_relu, optimizer, scaler, epoch, mask, writer)
 
         if lr_scheduler is not None:
             lr_scheduler.step()
         # if train_acc > 0.5:
-        if mask < 0.01:
-            best_acc = test(model, epoch, best_acc, mask)
+        if mask < 0.01 or True:
+            best_acc = test(args, testloader, model, epoch, best_acc, mask, writer)
 
         # Save the model after each epoch
         torch.save(model.state_dict(), f"{log_dir}/model_epoch_{epoch}.pth")
