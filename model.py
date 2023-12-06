@@ -127,6 +127,8 @@ class ResNetPoly(nn.Module):
 
         self.relu1 = general_relu_poly(if_channel, if_pixel, poly_weight_inits, poly_factors, 64)
 
+        self.if_forward_with_fms = False
+
     def _create_blocks(self, block, planes, num_blocks, stride):
         strides = [stride] + [1]*(num_blocks-1)
         blocks = []
@@ -194,8 +196,15 @@ class ResNetPoly(nn.Module):
                     m.weight.requires_grad = not freeze_bn
                     m.bias.requires_grad = not freeze_bn
         
+    def forward(self, x_and_mask):
+        x, mask = x_and_mask
+        if self.if_forward_with_fms:
+            out, fms = self.forward_with_fms(x, mask)
+            return (out, fms)
+        else:
+            return self.forward_without_fms(x, mask)
 
-    def forward(self, x, mask):
+    def forward_without_fms(self, x, mask):
 
         out = self.conv1(x)
         out = self.bn1(out)

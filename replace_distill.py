@@ -49,6 +49,8 @@ parser.add_argument('--resume', type=ast.literal_eval, default=False)
 parser.add_argument('--resume_dir', type=str)
 parser.add_argument('--resume_epoch', type=int, default=None)
 
+# parser.add_argument("--local_rank", default=os.getenv('LOCAL_RANK', -1), type=int)
+
 args = parser.parse_args()
 
 torch.manual_seed(10)
@@ -71,6 +73,11 @@ if args.resume:
                 setattr(args, key, value)
 
 def main(args):
+    # if args.local_rank != -1:
+    #     torch.cuda.set_device(args.local_rank)
+    #     device=torch.device("cuda", args.local_rank)
+    #     torch.distributed.init_process_group(backend="nccl", init_method='env://')
+
     t_max = args.total_epochs
     best_acc = 0  # best test accuracy
     start_epoch = 0  # start from epoch 0 or last checkpoint epoch
@@ -81,13 +88,12 @@ def main(args):
         if args.bf16:
             raise NotImplementedError("BF16 support is not yet available.")
         if args.fp16:
-            print("FP16 enabled.")
+            raise NotImplementedError("FP16 support is not yet available.")
+            # print("FP16 enabled.")
 
-    if args.bf16 or args.fp16:
-        if args.bf16:
-            print("enable bf16")
-        if args.fp16:
-            print("enable fp16")
+    print("gpu count =", torch.cuda.device_count())
+    args.batch_size_train *= torch.cuda.device_count()
+    args.batch_size_test *= torch.cuda.device_count()
     
     if args.data_augment:
         transform_train = transforms.Compose([
@@ -125,8 +131,8 @@ def main(args):
 
     model = ResNet18Poly(args.channel_wise, args.pixel_wise, args.poly_weight_inits, args.poly_weight_factors, relu2_extra_factor=1)
 
-    dummy_input = torch.rand(1, 3, 224, 224) 
-    model(dummy_input, 0)
+    dummy_input = torch.rand(60, 3, 224, 224) 
+    model((dummy_input, 0))
 
     pretrain_model = torchvision.models.resnet18(pretrained=True)
 
@@ -180,11 +186,6 @@ def main(args):
     # test(pretrain_model.cuda(), 0, tmp_test_acc, None)
     # tmp_test_acc = 0
     # test(model.cuda(), 0, tmp_test_acc, 1)
-    
-    print("gpu count =", torch.cuda.device_count())
-    if torch.cuda.device_count() > 1:
-        model = torch.nn.DataParallel(model)
-        pretrain_model = torch.nn.DataParallel(pretrain_model)
 
     # pretrain_model = pretrain_model.cuda()
     
@@ -234,7 +235,7 @@ def main(args):
     elif args.lr_anneal == "cos":
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=t_max)
 
-    scaler = torch.cuda.amp.GradScaler(enabled=args.bf16 or args.fp16)
+    # scaler = torch.cuda.amp.GradScaler(enabled=args.bf16 or args.fp16)
 
     if args.resume and args.resume_dir:
         log_root = args.resume_dir
@@ -262,17 +263,27 @@ def main(args):
     values_list = [str(value) for key, value in vars(args).items()]
     print_prefix = ' '.join(values_list)
 
+
+    if torch.cuda.device_count() > 1:
+        model = torch.nn.DataParallel(model)
+        model_relu = torch.nn.DataParallel(model_relu)
+
     for epoch in range(start_epoch, start_epoch + t_max):
         mask = mask_provider.get_mask(epoch)
+
         # mask = 1
         # mask = 0
 
         print("mask = ", mask)
+
         writer.add_scalar('Mask value', mask, epoch)
         if args.pixel_wise:
-            total_elements, relu_elements = model.get_relu_density(mask)
+            if isinstance(model, torch.nn.DataParallel):
+                total_elements, relu_elements = model.module.get_relu_density(mask)
+            else:
+                total_elements, relu_elements = model.get_relu_density(mask)
             print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
-        train_acc = train(args, trainloader, model, model_relu, optimizer, scaler, epoch, mask, writer)
+        train_acc = train(args, trainloader, model, model_relu, optimizer, epoch, mask, writer)
 
         if lr_scheduler is not None:
             lr_scheduler.step()

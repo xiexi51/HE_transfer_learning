@@ -78,6 +78,8 @@ class ResNetRelu(nn.Module):
 
         self.relu1 = nn.ReLU()
 
+        self.if_forward_with_fms = True
+
     def _create_blocks(self, block, planes, num_blocks, stride):
         strides = [stride] + [1]*(num_blocks-1)
         blocks = []
@@ -127,9 +129,16 @@ class ResNetRelu(nn.Module):
         torch.save(out, f"{save_dir}/out_view.pt")
         out = self.linear(out)
         torch.save(out, f"{save_dir}/linear.pt")
-        return out    
+        return out  
 
-    def forward(self, x, mask):
+    def forward(self, x):
+        if self.if_forward_with_fms:
+            out, fms = self.forward_with_fms(x)
+            return (out, fms)
+        else:
+            return self.forward_without_fms(x)  
+
+    def forward_without_fms(self, x):
 
         out = self.conv1(x)
         out = self.bn1(out)
@@ -149,7 +158,7 @@ class ResNetRelu(nn.Module):
 
         return out
     
-    def forward_with_fms(self, x, mask):
+    def forward_with_fms(self, x):
         fms = []
         out = self.conv1(x)
         out = self.bn1(out)
@@ -182,7 +191,7 @@ class ResNetRelu(nn.Module):
 
         return out, fms
     
-    def forward_with_fms_and_pre(self, x, mask):
+    def forward_with_fms_and_pre(self, x):
         fms_pre = []
         fms = []
         

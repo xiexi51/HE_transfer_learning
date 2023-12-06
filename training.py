@@ -4,7 +4,7 @@ import torch.nn as nn
 from utils import custom_mse_loss, at_loss, SoftTarget, accuracy
 import numpy as np
 
-def train(args, trainloader, model_s, model_t, optimizer, scaler, epoch, mask, writer):
+def train(args, trainloader, model_s, model_t, optimizer, epoch, mask, writer):
     # model_s.train_fz_bn()
     model_s.train()
     model_t.eval()
@@ -38,32 +38,34 @@ def train(args, trainloader, model_s, model_t, optimizer, scaler, epoch, mask, w
         x, y = x.cuda(), y.cuda()
         if args.bf16:
             x = x.to(dtype=torch.bfloat16)
-
         optimizer.zero_grad()
+        with torch.no_grad():
+            if isinstance(model_t, torch.nn.DataParallel):
+                model_t.module.if_forward_with_fms = True
+            else:
+                model_t.if_forward_with_fms = True
+            out_t, fms_t = model_t(x)        
+        if isinstance(model_s, torch.nn.DataParallel):
+            model_s.module.if_forward_with_fms = True
+        else:
+            model_s.if_forward_with_fms = True
+        out_s, fms_s = model_s((x, mask))
 
-        with torch.cuda.amp.autocast(enabled=args.bf16 or args.fp16):
-            with torch.no_grad():
-                out_t, fms_t = model_t.forward_with_fms(x, 0)
-            out_s, fms_s = model_s.forward_with_fms(x, mask)
+        loss_fm = sum(loss_fm_fun(x, y) for x, y in zip(fms_s, fms_t))
+        loss_kd = criterion_kd(out_s, out_t) 
+        loss_ce = criterion_ce(out_s, y) 
 
-            loss_fm = sum(loss_fm_fun(x, y) for x, y in zip(fms_s, fms_t))
-
-            loss_kd = criterion_kd(out_s, out_t) 
-            loss_ce = criterion_ce(out_s, y) 
-
-            loss = 0
-            if args.loss_fm_factor > 0:
-                loss += loss_fm * args.loss_fm_factor
-            if args.loss_kd_factor > 0:
-                loss += loss_kd * args.loss_kd_factor
-            if args.loss_ce_factor > 0:
-                loss += loss_ce * args.loss_ce_factor
+        loss = 0
+        if args.loss_fm_factor > 0:
+            loss += loss_fm * args.loss_fm_factor
+        if args.loss_kd_factor > 0:
+            loss += loss_kd * args.loss_kd_factor
+        if args.loss_ce_factor > 0:
+            loss += loss_ce * args.loss_ce_factor
         
-        scaler.scale(loss).backward()
-        scaler.unscale_(optimizer)  
+        loss.backward()
         torch.nn.utils.clip_grad_norm_(model_s.parameters(), 5)
-        scaler.step(optimizer)
-        scaler.update()
+        optimizer.step()
 
         if args.lookahead:
             optimizer.sync_lookahead()
@@ -104,12 +106,15 @@ def test(args, testloader, model, epoch, best_acc, mask, writer):
         x, y = x.cuda(), y.cuda()
         if args.bf16:
             x = x.to(dtype=torch.bfloat16)
-        with torch.cuda.amp.autocast(enabled=args.bf16 or args.fp16):
-            with torch.no_grad():
-                if mask is not None:
-                    out = model(x, mask)
-                else:
-                    out = model(x)
+        with torch.no_grad():
+            if isinstance(model, torch.nn.DataParallel):
+                model.module.if_forward_with_fms = False
+            else:
+                model.if_forward_with_fms = False
+            if mask is not None:
+                out = model((x, mask))
+            else:
+                out = model(x)
         top1, top5 = accuracy(out, y, topk=(1, 5))
         top1_total += top1[0] * x.size(0)
         top5_total += top5[0] * x.size(0)
