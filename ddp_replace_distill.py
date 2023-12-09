@@ -11,8 +11,8 @@ from model import ResNet18Poly, general_relu_poly, convert_to_bf16_except_bn, fi
 from model_relu import ResNet18Relu
 import numpy as np
 import re
-from training import train, test, MaskProvider
-from utils import Lookahead
+from ddp_training import ddp_train, ddp_test
+from utils import Lookahead, MaskProvider
 from datetime import datetime
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data.distributed import DistributedSampler
@@ -287,7 +287,7 @@ def process(pn, args):
         # print(f"pn {pn} reach before barrier")
         # barrier.wait()
         # print(f"pn {pn} reach after barrier")
-        train_acc = train(args, trainloader, model, model_relu, optimizer, epoch, mask, writer, pn)
+        train_acc = ddp_train(args, trainloader, model, model_relu, optimizer, epoch, mask, writer, pn)
         # barrier.wait()
 
         # print(f"epoch {epoch}, pn {pn}, train_acc = {train_acc*100:.2f}")
@@ -296,7 +296,7 @@ def process(pn, args):
             lr_scheduler.step()
         # if train_acc > 0.5:
         if mask < 0.01 or False:
-            test_acc, best_acc = test(args, testloader, model, epoch, best_acc, mask, writer, pn)
+            test_acc, best_acc = ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn)
             # barrier.wait()
             # print(f"epoch {epoch}, pn {pn}, test_acc = {test_acc*100:.2f}, test_best = {best_acc*100:.2f}")
 

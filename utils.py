@@ -3,6 +3,7 @@ from torch.optim.optimizer import Optimizer
 from collections import defaultdict
 from torch.nn import functional as F
 import torch.nn as nn
+import numpy as np
 
 def print_available_gpus():
     num_devices = torch.cuda.device_count()
@@ -123,3 +124,21 @@ def custom_mse_loss(x, y):
     adjust_factor = torch.where(y > 0, 1/3, 1.0)  # Create a factor, 1/3 where y > 0, else 1
     adjusted_loss = mse_loss * adjust_factor  # Adjust the loss
     return adjusted_loss.mean()  # Return the mean loss
+
+class MaskProvider:
+    def __init__(self, decrease_type, mask_epochs):
+        self.mask_epochs = mask_epochs
+        if decrease_type == "1-sinx":
+            mask_x = np.linspace(0, np.pi / 2, mask_epochs+1)[1:]
+            self.mask_y = 1 - np.sin(mask_x)
+        elif decrease_type == "e^(-x/10)":
+            mask_x = np.linspace(0, 80, mask_epochs+1)[1:]
+            self.mask_y = np.exp(-mask_x / 10)
+        else:  # linear decrease
+            self.mask_y = np.linspace(1, 0, mask_epochs+1)[1:]
+
+    def get_mask(self, epoch):
+        if epoch <= self.mask_epochs - 1:
+            return self.mask_y[epoch]
+        else:
+            return 0
