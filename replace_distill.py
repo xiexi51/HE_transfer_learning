@@ -5,13 +5,14 @@ import torchvision
 import torchvision.transforms as transforms
 import argparse
 from torch.utils.tensorboard import SummaryWriter
+from torchvision.models import resnet18, ResNet18_Weights
 import ast
 from model import ResNet18Poly, general_relu_poly, convert_to_bf16_except_bn, find_submodule, copy_parameters
 from model_relu import ResNet18Relu
 import numpy as np
 import re
-from training import train, test, MaskProvider
-from utils import Lookahead
+from training import train, test
+from utils import Lookahead, MaskProvider
 from datetime import datetime
 
 parser = argparse.ArgumentParser(description='Fully poly replacement on ResNet for ImageNet')
@@ -41,7 +42,7 @@ parser.add_argument('--lr_anneal', type=str, default='None', choices = ['None', 
 parser.add_argument('--bf16', type=ast.literal_eval, default=False, help='if enable training with bf16 precision')
 parser.add_argument('--fp16', type=ast.literal_eval, default=False, help='if enable training with float16 precision')
 
-parser.add_argument('--num_workers', type=int, default=10)
+parser.add_argument('--num_workers', type=int, default=5)
 parser.add_argument('--pbar', type=ast.literal_eval, default=True)
 parser.add_argument('--log_root', type=str)
 
@@ -134,7 +135,7 @@ def main(args):
     dummy_input = torch.rand(60, 3, 224, 224) 
     model((dummy_input, 0))
 
-    pretrain_model = torchvision.models.resnet18(pretrained=True)
+    pretrain_model = torchvision.models.resnet18(weights=ResNet18_Weights.DEFAULT)
 
     def find_latest_epoch(resume_dir):
         max_epoch = -1
@@ -191,6 +192,8 @@ def main(args):
     
     model = model.cuda()
     model.eval()
+
+    # torch.save(model.state_dict(), f"default_poly_model.pth")
 
     model_relu = model_relu.cuda()
 
@@ -288,7 +291,7 @@ def main(args):
         if lr_scheduler is not None:
             lr_scheduler.step()
         # if train_acc > 0.5:
-        if mask < 0.01 or True:
+        if mask < 0.01 or False:
             best_acc = test(args, testloader, model, epoch, best_acc, mask, writer)
 
         # Save the model after each epoch

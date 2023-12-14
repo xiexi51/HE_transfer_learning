@@ -117,6 +117,8 @@ def process(pn, args):
     else:
         copy_parameters(pretrain_model, model)  
 
+    model.load_state_dict(torch.load("default_poly_model.pth"))
+
     # model = model.cuda()
 
     # writer = SummaryWriter(log_dir=args.resume_dir)
@@ -151,26 +153,33 @@ def process(pn, args):
 
     model_relu = model_relu.cuda()
 
+    for param in model_relu.parameters():
+        param.requires_grad = False
+    
+    model = DistributedDataParallel(model, device_ids=[pn])
+    # model_relu = DistributedDataParallel(model_relu, device_ids=[pn])
+
+
     if args.bf16:
         model = convert_to_bf16_except_bn(model)
         model_relu = convert_to_bf16_except_bn(model_relu)
 
-    relu_poly_params = []
-    other_params = []
+    # relu_poly_params = []
+    # other_params = []
 
-    for name, param in model.named_parameters():
-        submodule_name = '.'.join(name.split('.')[:-1])
-        submodule = find_submodule(model, submodule_name)
+    # for name, param in model.named_parameters():
+    #     submodule_name = '.'.join(name.split('.')[:-1])
+    #     submodule = find_submodule(model, submodule_name)
         
-        if isinstance(submodule, general_relu_poly):
-            relu_poly_params.append(param)
-        else:
-            other_params.append(param)
+    #     if isinstance(submodule, general_relu_poly):
+    #         relu_poly_params.append(param)
+    #     else:
+    #         other_params.append(param)
 
-    optimizer_params = [
-        {'params': relu_poly_params, 'lr': args.lr},
-        {'params': other_params, 'lr': args.lr}
-    ]
+    # optimizer_params = [
+    #     {'params': relu_poly_params, 'lr': args.lr},
+    #     {'params': other_params, 'lr': args.lr}
+    # ]
 
     # i = 0
     # for param_group in optimizer_params:
@@ -179,10 +188,10 @@ def process(pn, args):
     #         i += 1
     #         print(f"{i} Param Name: {p.shape}, Learning Rate: {lr}")
     
-    optimizer = optim.AdamW(optimizer_params)
+    # optimizer = optim.AdamW(optimizer_params)
 
     # optimizer = optim.AdamW(param_groups)
-    # optimizer = optim.AdamW(model.parameters(), lr = args.lr, weight_decay=args.w_decay)
+    optimizer = optim.AdamW(model.parameters(), lr = args.lr, weight_decay=args.w_decay)
 
     if args.lookahead:
         optimizer = Lookahead(optimizer)
@@ -223,15 +232,7 @@ def process(pn, args):
     values_list = [str(value) for key, value in vars(args).items()]
     print_prefix = ' '.join(values_list)
 
-    model.cuda()
-
-    for param in model_relu.parameters():
-        param.requires_grad = False
     
-    model_relu.cuda()
-    
-    model = DistributedDataParallel(model, device_ids=[pn])
-    # model_relu = DistributedDataParallel(model_relu, device_ids=[pn])
 
     def fp16_compress_hook(
         process_group: dist.ProcessGroup, bucket: dist.GradBucket
@@ -251,7 +252,6 @@ def process(pn, args):
         world_size = group_to_use.size()
 
         compressed_tensor = bucket.buffer().to(torch.float16).div_(world_size)
-
         fut = dist.all_reduce(
             compressed_tensor, group=group_to_use, async_op=True
         ).get_future()
@@ -288,6 +288,7 @@ def process(pn, args):
         # barrier.wait()
         # print(f"pn {pn} reach after barrier")
         train_acc = ddp_train(args, trainloader, model, model_relu, optimizer, epoch, mask, writer, pn)
+
         # barrier.wait()
 
         # print(f"epoch {epoch}, pn {pn}, train_acc = {train_acc*100:.2f}")
@@ -324,13 +325,13 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size_train', type=int, default=500, help='Batch size for training')
     parser.add_argument('--batch_size_test', type=int, default=1000, help='Batch size for testing')
     parser.add_argument('--data_augment', type=ast.literal_eval, default=True)
-    parser.add_argument('--train_subset', type=ast.literal_eval, default=True, help='if train on the 1/13 subset of ImageNet or the full ImageNet')
+    parser.add_argument('--train_subset', type=ast.literal_eval, default=False, help='if train on the 1/13 subset of ImageNet or the full ImageNet')
     parser.add_argument('--pixel_wise', type=ast.literal_eval, default=True, help='if use pixel-wise poly replacement')
     parser.add_argument('--channel_wise', type=ast.literal_eval, default=True, help='if use channel-wise relu_poly class')
     parser.add_argument('--poly_weight_inits', nargs=3, type=float, default=[0, 1, 0], help='relu_poly weights initial values')
-    parser.add_argument('--poly_weight_factors', nargs=3, type=float, default=[0.1, 1, 0.1], help='adjust the learning rate of the three weights in relu_poly')
-    parser.add_argument('--mask_decrease', type=str, default='e^(-x/10)', choices = ['1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
-    parser.add_argument('--mask_epochs', default=80, type=int, help='the epoch that the relu replacing mask will decrease to 0')
+    parser.add_argument('--poly_weight_factors', nargs=3, type=float, default=[0.05, 1, 0.1], help='adjust the learning rate of the three weights in relu_poly')
+    parser.add_argument('--mask_decrease', type=str, default='1-sinx', choices = ['1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
+    parser.add_argument('--mask_epochs', default=20, type=int, help='the epoch that the relu replacing mask will decrease to 0')
     parser.add_argument('--loss_fm_type', type=str, default='at', choices = ['at', 'mse', 'custom_mse'], help='the type for the feature map loss')
     parser.add_argument('--loss_fm_factor', default=100, type=float, help='the factor of the feature map loss, set to 0 to disable')
     parser.add_argument('--loss_ce_factor', default=1, type=float, help='the factor of the cross-entropy loss, set to 0 to disable')
@@ -348,7 +349,7 @@ if __name__ == "__main__":
     parser.add_argument('--resume_dir', type=str)
     parser.add_argument('--resume_epoch', type=int, default=None)
 
-    parser.add_argument("--local_rank", default=os.getenv('LOCAL_RANK', -1), type=int)
+    # parser.add_argument("--local_rank", default=os.getenv('LOCAL_RANK', -1), type=int)
 
     args = parser.parse_args()
 
@@ -369,6 +370,8 @@ if __name__ == "__main__":
                     setattr(args, key, value)
 
     args.total_gpus = torch.cuda.device_count()
+
+    # args.lr *= args.total_gpus
 
     # barrier = mp.Barrier(args.total_gpus)
 

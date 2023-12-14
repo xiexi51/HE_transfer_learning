@@ -32,8 +32,17 @@ def train(args, trainloader, model_s, model_t, optimizer, epoch, mask, writer):
 
     criterion_kd = SoftTarget(4.0).cuda()
     criterion_ce = nn.CrossEntropyLoss()
+    
+    cnt = 0
+    # optimizer.zero_grad()
 
     for x, y in pbar:
+        # torch.save(x, f'x{cnt}.pt')
+        # torch.save(y, f'y{cnt}.pt')
+        cnt += 1
+        
+        # print(x[0,0,0,0].numpy())
+        # continue
         x, y = x.cuda(), y.cuda()
         if args.bf16:
             x = x.to(dtype=torch.bfloat16)
@@ -50,6 +59,11 @@ def train(args, trainloader, model_s, model_t, optimizer, epoch, mask, writer):
             model_s.if_forward_with_fms = True
         out_s, fms_s = model_s((x, mask))
 
+        # torch.save(out_t, f'origin_out_t.pt')
+        # torch.save(fms_t, f'origin_fms_t.pt')
+        # torch.save(out_s, f'origin_out_s.pt')
+        # torch.save(fms_s, f'origin_fms_s.pt')
+
         loss_fm = sum(loss_fm_fun(x, y) for x, y in zip(fms_s, fms_t))
         loss_kd = criterion_kd(out_s, out_t) 
         loss_ce = criterion_ce(out_s, y) 
@@ -63,11 +77,29 @@ def train(args, trainloader, model_s, model_t, optimizer, epoch, mask, writer):
             loss += loss_ce * args.loss_ce_factor
         
         loss.backward()
+
+        # gradients = {}
+        # weights = {}
+        # for name, parameter in model_s.named_parameters():
+        #     # 保存梯度
+        #     if parameter.grad is not None:
+        #         gradients[name] = parameter.grad.clone()
+        #     # 保存权重
+        #     weights[name] = parameter.data.clone()
+
+        
+        # if cnt > 1:
+        #     torch.save(gradients, f'origin_2_gradients.pt')
+        #     return
+        
+        # 保存权重
+        # torch.save(weights, f'origin_weights.pt')
+
         torch.nn.utils.clip_grad_norm_(model_s.parameters(), 5)
         optimizer.step()
 
-        if args.lookahead:
-            optimizer.sync_lookahead()
+        # if args.lookahead:
+        #     optimizer.sync_lookahead()
         
         train_loss += loss.item()
         train_loss_fm += loss_fm.item()
@@ -82,6 +114,8 @@ def train(args, trainloader, model_s, model_t, optimizer, epoch, mask, writer):
         if args.pbar:
             pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e}, 1a {100*top1_total/total:.1f}, 5a {100*top5_total/total:.1f}")
 
+
+    
     train_acc = (top1_total / total).item()
     # print('Epoch', epoch, 'Training Acc:', train_acc*100)
     writer.add_scalar('Accuracy/train', train_acc, epoch)

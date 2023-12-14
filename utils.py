@@ -15,7 +15,7 @@ def print_available_gpus():
         print(f"  GPU {i}: {device_name}, Capability: {device_capability}")
 
 class Lookahead(Optimizer):
-    def __init__(self, base_optimizer, alpha=0.5, k=6):
+    def __init__(self, base_optimizer, alpha=0.5, k=1):
         # NOTE super().__init__() not called on purpose
         if not 0.0 <= alpha <= 1.0:
             raise ValueError(f'Invalid slow update rate: {alpha}')

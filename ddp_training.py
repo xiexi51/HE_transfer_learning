@@ -3,6 +3,7 @@ from tqdm import tqdm
 import torch.nn as nn
 from utils import custom_mse_loss, at_loss, SoftTarget, accuracy
 from torch.nn.parallel import DistributedDataParallel
+import torch.distributed as dist
 
 def ddp_train(args, trainloader, model_s, model_t, optimizer, epoch, mask, writer, pn):
     # model_s.train_fz_bn()
@@ -35,7 +36,12 @@ def ddp_train(args, trainloader, model_s, model_t, optimizer, epoch, mask, write
     criterion_ce = nn.CrossEntropyLoss()
 
     for x, y in pbar:
+        # print(pn, x[0,0,0,0].numpy())
+        # break
         x, y = x.cuda(), y.cuda()
+        # x = torch.load(f'x{pn}.pt').cuda()
+        # y = torch.load(f'y{pn}.pt').cuda()
+
         if args.bf16:
             x = x.to(dtype=torch.bfloat16)
         optimizer.zero_grad()
@@ -51,6 +57,11 @@ def ddp_train(args, trainloader, model_s, model_t, optimizer, epoch, mask, write
             model_s.if_forward_with_fms = True
         out_s, fms_s = model_s((x, mask))
 
+        # torch.save(out_t, f'{pn}_out_t.pt')
+        # torch.save(fms_t, f'{pn}_fms_t.pt')
+        # torch.save(out_s, f'{pn}_out_s.pt')
+        # torch.save(fms_s, f'{pn}_fms_s.pt')
+
         loss_fm = sum(loss_fm_fun(x, y) for x, y in zip(fms_s, fms_t))
         loss_kd = criterion_kd(out_s, out_t) 
         loss_ce = criterion_ce(out_s, y) 
@@ -64,11 +75,25 @@ def ddp_train(args, trainloader, model_s, model_t, optimizer, epoch, mask, write
             loss += loss_ce * args.loss_ce_factor
         
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model_s.parameters(), 5)
-        optimizer.step()
 
-        if args.lookahead:
-            optimizer.sync_lookahead()
+        # gradients = {}
+        # weights = {}
+        # for name, parameter in model_s.module.named_parameters():
+        
+        #     if parameter.grad is not None:
+        #         gradients[name] = parameter.grad.clone()
+        #     weights[name] = parameter.data.clone()
+
+        # torch.save(gradients, f'{pn}_2_gradients.pt')
+        # torch.save(weights, f'{pn}_weights.pt')
+
+        # for param in model_s.parameters():
+        #     if param.requires_grad and param.grad is not None:
+        #         param.grad *= args.total_gpus
+
+        # torch.nn.utils.clip_grad_norm_(model_s.parameters(), 5)
+        
+        optimizer.step()
         
         train_loss += loss.item()
         train_loss_fm += loss_fm.item()
@@ -79,9 +104,23 @@ def ddp_train(args, trainloader, model_s, model_t, optimizer, epoch, mask, write
         top1_total += top1[0] * x.size(0)
         top5_total += top5[0] * x.size(0)
         total += x.size(0)
+
+        reduced_total = torch.tensor(total, dtype=torch.float).cuda().detach()
+        reduced_top1_total = torch.tensor(top1_total, dtype=torch.float).cuda().detach()
+        reduced_top5_total = torch.tensor(top5_total, dtype=torch.float).cuda().detach()
+        dist.reduce(reduced_total, dst=0)
+        dist.reduce(reduced_top1_total, dst=0)
+        dist.reduce(reduced_top5_total, dst=0)
+
+        reduced_total = reduced_total.cpu().numpy()
+        reduced_top1_total = reduced_top1_total.cpu().numpy()
+        reduced_top5_total = reduced_top5_total.cpu().numpy()
         
         if args.pbar and pn == 0:
-            pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e}, 1a {100*top1_total/total:.1f}, 5a {100*top5_total/total:.1f}")
+            # print(total, top1_total, top5_total)
+            # print(reduced_total, reduced_top1_total, reduced_top5_total)
+            pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e}, 1a {100*reduced_top1_total/reduced_total:.1f}, 5a {100*reduced_top5_total/reduced_total:.1f}")
+
 
     train_acc = (top1_total / total).item()
 
@@ -103,6 +142,7 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn):
     else:
         pbar = testloader
 
+    test_acc = 0
     for x, y in pbar:
         x, y = x.cuda(), y.cuda()
         if args.bf16:
@@ -122,10 +162,22 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn):
         top5_total += top5[0] * x.size(0)
         total += x.size(0)
 
-        if args.pbar and pn == 0:
-            pbar.set_postfix_str(f"1a {100*top1_total/total:.2f}, 5a {100*top5_total/total:.2f}, best {100*best_acc:.2f}")
+        reduced_total = torch.tensor(total, dtype=torch.float).cuda().detach()
+        reduced_top1_total = torch.tensor(top1_total, dtype=torch.float).cuda().detach()
+        reduced_top5_total = torch.tensor(top5_total, dtype=torch.float).cuda().detach()
+        dist.reduce(reduced_total, dst=0)
+        dist.reduce(reduced_top1_total, dst=0)
+        dist.reduce(reduced_top5_total, dst=0)
 
-    test_acc = (top1_total / total).item()
+        reduced_total = reduced_total.cpu().numpy()
+        reduced_top1_total = reduced_top1_total.cpu().numpy()
+        reduced_top5_total = reduced_top5_total.cpu().numpy()
+
+        if args.pbar and pn == 0:
+            pbar.set_postfix_str(f"1a {100*reduced_top1_total/reduced_total:.2f}, 5a {100*reduced_top5_total/reduced_total:.2f}, best {100*best_acc:.2f}")
+            test_acc = reduced_top1_total/reduced_total
+
+    # test_acc = (top1_total / total).item()
     if writer is not None:
         writer.add_scalar('Accuracy/test', test_acc, epoch)
     
