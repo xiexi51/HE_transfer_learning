@@ -17,7 +17,7 @@ from datetime import datetime
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data.distributed import DistributedSampler
 import torch.multiprocessing as mp
-import torch.distributed as dist
+
 
 def process(pn, args):
     torch.cuda.set_device(pn)
@@ -101,13 +101,17 @@ def process(pn, args):
                     max_epoch = epoch
         return max_epoch
 
-    if args.resume:
-        if args.resume_epoch is None:
-            start_epoch = find_latest_epoch(args.resume_dir) + 1
+    if args.resume or args.reload:
+        if args.resume:
+            if args.resume_epoch is None:
+                start_epoch = find_latest_epoch(args.resume_dir) + 1
+            else:
+                start_epoch = args.resume_epoch    
+            t_max = args.total_epochs - start_epoch
+            checkpoint_path = os.path.join(args.resume_dir, f'model_epoch_{start_epoch - 1}.pth')
         else:
-            start_epoch = args.resume_epoch
-        t_max = args.total_epochs - start_epoch
-        checkpoint_path = os.path.join(args.resume_dir, f'model_epoch_{start_epoch - 1}.pth')
+            checkpoint_path = os.path.join(args.resume_dir, f'model_epoch_{args.resume_epoch}.pth')
+
         if checkpoint_path and os.path.exists(checkpoint_path):
             print(f"Loading checkpoint: {checkpoint_path}")
             state_dict = torch.load(checkpoint_path)
@@ -115,9 +119,8 @@ def process(pn, args):
         else:
             print(f"No checkpoint found at {checkpoint_path}")
     else:
-        copy_parameters(pretrain_model, model)  
-
-    model.load_state_dict(torch.load("default_poly_model.pth"))
+        copy_parameters(pretrain_model, model) 
+        # model.load_state_dict(torch.load("default_poly_model.pth"))
 
     # model = model.cuda()
 
@@ -232,40 +235,12 @@ def process(pn, args):
     values_list = [str(value) for key, value in vars(args).items()]
     print_prefix = ' '.join(values_list)
 
-    
-
-    def fp16_compress_hook(
-        process_group: dist.ProcessGroup, bucket: dist.GradBucket
-    ) -> torch.futures.Future[torch.Tensor]:
-        """
-        This DDP communication hook implements a simple gradient compression
-        approach that casts ``GradBucket`` tensor to half-precision floating-point format (``torch.float16``)
-        and then divides it by the process group size.
-        It allreduces those ``float16`` gradient tensors. Once compressed gradient
-        tensors are allreduced, the chained callback ``decompress`` casts it back to the input data type (such as ``float32``).
-
-        Example::
-            >>> # xdoctest: +SKIP
-            >>> ddp_model.register_comm_hook(process_group, fp16_compress_hook)
-        """
-        group_to_use = process_group if process_group is not None else dist.group.WORLD
-        world_size = group_to_use.size()
-
-        compressed_tensor = bucket.buffer().to(torch.float16).div_(world_size)
-        fut = dist.all_reduce(
-            compressed_tensor, group=group_to_use, async_op=True
-        ).get_future()
-
-        def decompress(fut):
-            decompressed_tensor = bucket.buffer()
-            # Decompress in place to reduce the peak memory.
-            # See: https://github.com/pytorch/pytorch/issues/45968
-            decompressed_tensor.copy_(fut.value()[0])
-            return decompressed_tensor
-
-        return fut.then(decompress)
-
     # model.register_comm_hook(process_group, fp16_compress_hook)
+
+    # if pn == 0:
+    #     print(start_epoch, t_max)
+    #     for arg, value in vars(args).items():
+    #         print(f"{arg}: {value}")
 
     for epoch in range(start_epoch, start_epoch + t_max):
         train_sampler.set_epoch(epoch)
@@ -287,6 +262,9 @@ def process(pn, args):
         # print(f"pn {pn} reach before barrier")
         # barrier.wait()
         # print(f"pn {pn} reach after barrier")
+        if mask < 0.01 or False:
+            test_acc, best_acc = ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn)
+
         train_acc = ddp_train(args, trainloader, model, model_relu, optimizer, epoch, mask, writer, pn)
 
         # barrier.wait()
@@ -296,8 +274,7 @@ def process(pn, args):
         if lr_scheduler is not None:
             lr_scheduler.step()
         # if train_acc > 0.5:
-        if mask < 0.01 or False:
-            test_acc, best_acc = ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn)
+        
             # barrier.wait()
             # print(f"epoch {epoch}, pn {pn}, test_acc = {test_acc*100:.2f}, test_best = {best_acc*100:.2f}")
 
@@ -319,23 +296,23 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Fully poly replacement on ResNet for ImageNet')
     parser.add_argument('--id', default=0, type=int)
     parser.add_argument('--total_epochs', default=100, type=int)
-    parser.add_argument('--lr', default=0.0005, type=float, help='learning rate')
+    parser.add_argument('--lr', default=0.0001, type=float, help='learning rate')
     parser.add_argument('--w_decay', default=0.000, type=float, help='w decay rate')
     parser.add_argument('--optim', type=str, default='adamw', choices = ['sgd', 'adamw'])
-    parser.add_argument('--batch_size_train', type=int, default=500, help='Batch size for training')
-    parser.add_argument('--batch_size_test', type=int, default=1000, help='Batch size for testing')
+    parser.add_argument('--batch_size_train', type=int, default=200, help='Batch size for training')
+    parser.add_argument('--batch_size_test', type=int, default=200, help='Batch size for testing')
     parser.add_argument('--data_augment', type=ast.literal_eval, default=True)
     parser.add_argument('--train_subset', type=ast.literal_eval, default=False, help='if train on the 1/13 subset of ImageNet or the full ImageNet')
     parser.add_argument('--pixel_wise', type=ast.literal_eval, default=True, help='if use pixel-wise poly replacement')
     parser.add_argument('--channel_wise', type=ast.literal_eval, default=True, help='if use channel-wise relu_poly class')
     parser.add_argument('--poly_weight_inits', nargs=3, type=float, default=[0, 1, 0], help='relu_poly weights initial values')
-    parser.add_argument('--poly_weight_factors', nargs=3, type=float, default=[0.05, 1, 0.1], help='adjust the learning rate of the three weights in relu_poly')
-    parser.add_argument('--mask_decrease', type=str, default='1-sinx', choices = ['1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
-    parser.add_argument('--mask_epochs', default=20, type=int, help='the epoch that the relu replacing mask will decrease to 0')
+    parser.add_argument('--poly_weight_factors', nargs=3, type=float, default=[0.1, 1, 0.1], help='adjust the learning rate of the three weights in relu_poly')
+    parser.add_argument('--mask_decrease', type=str, default='0', choices = ['0', '1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
+    parser.add_argument('--mask_epochs', default=80, type=int, help='the epoch that the relu replacing mask will decrease to 0')
     parser.add_argument('--loss_fm_type', type=str, default='at', choices = ['at', 'mse', 'custom_mse'], help='the type for the feature map loss')
-    parser.add_argument('--loss_fm_factor', default=100, type=float, help='the factor of the feature map loss, set to 0 to disable')
+    parser.add_argument('--loss_fm_factor', default=0, type=float, help='the factor of the feature map loss, set to 0 to disable')
     parser.add_argument('--loss_ce_factor', default=1, type=float, help='the factor of the cross-entropy loss, set to 0 to disable')
-    parser.add_argument('--loss_kd_factor', default=1, type=float, help='the factor of the knowledge distillation loss, set to 0 to disable')
+    parser.add_argument('--loss_kd_factor', default=0, type=float, help='the factor of the knowledge distillation loss, set to 0 to disable')
     parser.add_argument('--lookahead', type=ast.literal_eval, default=True, help='if enable look ahead for the optimizer')
     parser.add_argument('--lr_anneal', type=str, default='None', choices = ['None', 'cos'])
     parser.add_argument('--bf16', type=ast.literal_eval, default=False, help='if enable training with bf16 precision')
@@ -349,6 +326,8 @@ if __name__ == "__main__":
     parser.add_argument('--resume_dir', type=str)
     parser.add_argument('--resume_epoch', type=int, default=None)
 
+    parser.add_argument('--reload', type=ast.literal_eval, default=False)
+
     # parser.add_argument("--local_rank", default=os.getenv('LOCAL_RANK', -1), type=int)
 
     args = parser.parse_args()
@@ -361,12 +340,19 @@ if __name__ == "__main__":
             pass
         return key, value
 
-    if args.resume:
+    if args.reload:
         args_file = args.resume_dir + '/args.txt'
         with open(args_file, 'r') as file:
             for line in file:
                 key, value = parse_args_line(line.strip())
-                if hasattr(args, key) and not key.startswith('resume'):
+                if key in ['pixel_wise', 'channel_wise', 'poly_weight_factors']:
+                    setattr(args, key, value)
+    elif args.resume:
+        args_file = args.resume_dir + '/args.txt'
+        with open(args_file, 'r') as file:
+            for line in file:
+                key, value = parse_args_line(line.strip())
+                if hasattr(args, key) and not key.startswith('resume') and not key.startswith('reload'):
                     setattr(args, key, value)
 
     args.total_gpus = torch.cuda.device_count()

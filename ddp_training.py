@@ -45,34 +45,48 @@ def ddp_train(args, trainloader, model_s, model_t, optimizer, epoch, mask, write
         if args.bf16:
             x = x.to(dtype=torch.bfloat16)
         optimizer.zero_grad()
-        with torch.no_grad():
-            if isinstance(model_t, DistributedDataParallel):
-                model_t.module.if_forward_with_fms = True
+        if args.loss_fm_factor > 0 or args.loss_kd_factor > 0:
+            with torch.no_grad():
+                if isinstance(model_t, DistributedDataParallel):
+                    model_t.module.if_forward_with_fms = True
+                else:
+                    model_t.if_forward_with_fms = True
+                out_t, fms_t = model_t(x)
+
+        if args.loss_fm_factor > 0:
+            if isinstance(model_s, DistributedDataParallel):
+                model_s.module.if_forward_with_fms = True
             else:
-                model_t.if_forward_with_fms = True
-            out_t, fms_t = model_t(x)        
-        if isinstance(model_s, DistributedDataParallel):
-            model_s.module.if_forward_with_fms = True
+                model_s.if_forward_with_fms = True
+            out_s, fms_s = model_s((x, mask))
         else:
-            model_s.if_forward_with_fms = True
-        out_s, fms_s = model_s((x, mask))
+            if isinstance(model_s, DistributedDataParallel):
+                model_s.module.if_forward_with_fms = False
+            else:
+                model_s.if_forward_with_fms = False
+            out_s = model_s((x, mask))
 
         # torch.save(out_t, f'{pn}_out_t.pt')
         # torch.save(fms_t, f'{pn}_fms_t.pt')
         # torch.save(out_s, f'{pn}_out_s.pt')
         # torch.save(fms_s, f'{pn}_fms_s.pt')
 
-        loss_fm = sum(loss_fm_fun(x, y) for x, y in zip(fms_s, fms_t))
-        loss_kd = criterion_kd(out_s, out_t) 
-        loss_ce = criterion_ce(out_s, y) 
-
         loss = 0
+
         if args.loss_fm_factor > 0:
-            loss += loss_fm * args.loss_fm_factor
+            loss_fm = sum(loss_fm_fun(x, y) for x, y in zip(fms_s, fms_t)) * args.loss_fm_factor
+            loss += loss_fm
+            train_loss_fm += loss_fm.item()
         if args.loss_kd_factor > 0:
-            loss += loss_kd * args.loss_kd_factor
+            loss_kd = criterion_kd(out_s, out_t) * args.loss_kd_factor
+            loss += loss_kd
+            train_loss_kd += loss_kd.item()
         if args.loss_ce_factor > 0:
-            loss += loss_ce * args.loss_ce_factor
+            loss_ce = criterion_ce(out_s, y) * args.loss_ce_factor
+            loss += loss_ce
+            train_loss_ce += loss_ce.item()
+
+        train_loss += loss.item()
         
         loss.backward()
 
@@ -94,11 +108,6 @@ def ddp_train(args, trainloader, model_s, model_t, optimizer, epoch, mask, write
         # torch.nn.utils.clip_grad_norm_(model_s.parameters(), 5)
         
         optimizer.step()
-        
-        train_loss += loss.item()
-        train_loss_fm += loss_fm.item()
-        train_loss_kd += loss_kd.item()
-        train_loss_ce += loss_kd.item()
 
         top1, top5 = accuracy(out_s, y, topk=(1, 5))
         top1_total += top1[0] * x.size(0)
