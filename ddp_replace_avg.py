@@ -3,11 +3,11 @@ import torch
 import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
-from torchvision.models import resnet18, ResNet18_Weights
+from torchvision.models import ResNet18_Weights
 import argparse
 from torch.utils.tensorboard import SummaryWriter
 import ast
-from model import ResNet18Poly, general_relu_poly, convert_to_bf16_except_bn, find_submodule, copy_parameters
+from model_poly_avg import ResNet18FullPoly, relu_fullpoly, copy_parameters
 from model_relu import ResNet18Relu
 import numpy as np
 import re
@@ -17,7 +17,6 @@ from datetime import datetime
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data.distributed import DistributedSampler
 import torch.multiprocessing as mp
-
 
 def process(pn, args):
     torch.cuda.set_device(pn)
@@ -41,9 +40,6 @@ def process(pn, args):
 
     if pn == 0:
         print("gpu count =", torch.cuda.device_count())
-    
-    # args.batch_size_train *= torch.cuda.device_count()
-    # args.batch_size_test *= torch.cuda.device_count()
     
     if args.data_augment:
         transform_train = transforms.Compose([
@@ -82,9 +78,8 @@ def process(pn, args):
     
     test_sampler = DistributedSampler(testset, num_replicas=args.total_gpus, rank=pn)
     testloader = torch.utils.data.DataLoader(testset, sampler=test_sampler, batch_size=args.batch_size_test, num_workers=args.num_workers, pin_memory=True, shuffle=False)
-    # testloader = torch.utils.data.DataLoader(testset, batch_size = args.batch_size_test, shuffle=False, num_workers=args.num_workers, pin_memory=True)
 
-    model = ResNet18Poly(args.channel_wise, args.pixel_wise, args.poly_weight_inits, args.poly_weight_factors, relu2_extra_factor=1)
+    model = ResNet18FullPoly(args.poly_weight_factors, relu2_extra_factor=1)
 
     dummy_input = torch.rand(1, 3, 224, 224) 
     model((dummy_input, 0))
@@ -115,39 +110,17 @@ def process(pn, args):
         if checkpoint_path and os.path.exists(checkpoint_path):
             print(f"Loading checkpoint: {checkpoint_path}")
             state_dict = torch.load(checkpoint_path)
+            state_dict = {key: value for key, value in state_dict.items() if not key.endswith('rand_mask')}
             model.load_state_dict(state_dict)
         else:
             print(f"No checkpoint found at {checkpoint_path}")
     else:
-        copy_parameters(pretrain_model, model) 
-        # model.load_state_dict(torch.load("default_poly_model.pth"))
-
-    # model = model.cuda()
-
-    # writer = SummaryWriter(log_dir=args.resume_dir)
-
-    # # test(args, testloader, model, 80, 0, 0, writer)
-    
-    # mask_x = np.linspace(0, 80, args.mask_epochs)[1:]
-    # mask_y = np.exp(-mask_x / 10)
-    
-    # for epoch in range(22, 100):
-    #     mask = mask_y[epoch - 0]
-    #     model.load_state_dict(torch.load(os.path.join(args.resume_dir, f'model_epoch_{epoch}.pth')))
-    #     test(args, testloader, model, epoch, 0, mask, writer)
-
-    # initialize_resnet(model)
+        raise KeyError("The replacement of avgpool should only be conducted when args.reload = True")
+        
 
     model_relu = ResNet18Relu()
     
     copy_parameters(pretrain_model, model_relu)   
-    
-    # tmp_test_acc = 0
-    # test(pretrain_model.cuda(), 0, tmp_test_acc, None)
-    # tmp_test_acc = 0
-    # test(model.cuda(), 0, tmp_test_acc, 1)
-
-    # pretrain_model = pretrain_model.cuda()
 
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     
@@ -160,40 +133,7 @@ def process(pn, args):
         param.requires_grad = False
     
     model = DistributedDataParallel(model, device_ids=[pn])
-    # model_relu = DistributedDataParallel(model_relu, device_ids=[pn])
 
-
-    if args.bf16:
-        model = convert_to_bf16_except_bn(model)
-        model_relu = convert_to_bf16_except_bn(model_relu)
-
-    # relu_poly_params = []
-    # other_params = []
-
-    # for name, param in model.named_parameters():
-    #     submodule_name = '.'.join(name.split('.')[:-1])
-    #     submodule = find_submodule(model, submodule_name)
-        
-    #     if isinstance(submodule, general_relu_poly):
-    #         relu_poly_params.append(param)
-    #     else:
-    #         other_params.append(param)
-
-    # optimizer_params = [
-    #     {'params': relu_poly_params, 'lr': args.lr},
-    #     {'params': other_params, 'lr': args.lr}
-    # ]
-
-    # i = 0
-    # for param_group in optimizer_params:
-    #     lr = param_group['lr'] 
-    #     for p in param_group['params']:
-    #         i += 1
-    #         print(f"{i} Param Name: {p.shape}, Learning Rate: {lr}")
-    
-    # optimizer = optim.AdamW(optimizer_params)
-
-    # optimizer = optim.AdamW(param_groups)
     optimizer = optim.AdamW(model.parameters(), lr = args.lr, weight_decay=args.w_decay)
 
     if args.lookahead:
@@ -203,8 +143,6 @@ def process(pn, args):
         lr_scheduler = None
     elif args.lr_anneal == "cos":
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=t_max)
-
-    # scaler = torch.cuda.amp.GradScaler(enabled=args.bf16 or args.fp16)
 
     if args.resume and args.resume_dir:
         log_root = args.resume_dir
@@ -235,53 +173,29 @@ def process(pn, args):
     values_list = [str(value) for key, value in vars(args).items()]
     print_prefix = ' '.join(values_list)
 
-    # model.register_comm_hook(process_group, fp16_compress_hook)
-
     # if pn == 0:
     #     print(start_epoch, t_max)
     #     for arg, value in vars(args).items():
     #         print(f"{arg}: {value}")
     if args.reload:
-        test_acc, best_acc = ddp_test(args, testloader, model, args.resume_epoch, best_acc, mask_provider.get_mask(args.resume_epoch), writer, pn)
+        test_acc, best_acc = ddp_test(args, testloader, model, args.resume_epoch, best_acc, 1, writer, pn)
 
     for epoch in range(start_epoch, start_epoch + t_max):
         train_sampler.set_epoch(epoch)
         mask = mask_provider.get_mask(epoch)
 
-        # mask = 1
-        # mask = 0
-
         if pn == 0:
             print("mask = ", mask)
             writer.add_scalar('Mask value', mask, epoch)
-            if args.pixel_wise:
-                if isinstance(model, DistributedDataParallel):
-                    total_elements, relu_elements = model.module.get_relu_density(mask)
-                else:
-                    total_elements, relu_elements = model.get_relu_density(mask)
-                print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
-        
-        # print(f"pn {pn} reach before barrier")
-        # barrier.wait()
-        # print(f"pn {pn} reach after barrier")
         
         train_acc = ddp_train(args, trainloader, model, model_relu, optimizer, epoch, mask, writer, pn)
 
         if mask < 0.01 or False:
             test_acc, best_acc = ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn)
 
-        # barrier.wait()
-
-        # print(f"epoch {epoch}, pn {pn}, train_acc = {train_acc*100:.2f}")
-
         if lr_scheduler is not None:
             lr_scheduler.step()
-        # if train_acc > 0.5:
-        
-            # barrier.wait()
-            # print(f"epoch {epoch}, pn {pn}, test_acc = {test_acc*100:.2f}, test_best = {best_acc*100:.2f}")
 
-        # Save the model after each epoch
         if pn == 0:
             if isinstance(model, DistributedDataParallel):
                 torch.save(model.module.state_dict(), f"{log_dir}/model_epoch_{epoch}.pth")
@@ -294,24 +208,24 @@ def process(pn, args):
 if __name__ == "__main__":
 
     os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '29505'
+    os.environ['MASTER_PORT'] = '29506'
 
     parser = argparse.ArgumentParser(description='Fully poly replacement on ResNet for ImageNet')
     parser.add_argument('--id', default=0, type=int)
     parser.add_argument('--total_epochs', default=100, type=int)
-    parser.add_argument('--lr', default=0.0001, type=float, help='learning rate')
+    parser.add_argument('--lr', default=0.00005, type=float, help='learning rate')
     parser.add_argument('--w_decay', default=0.000, type=float, help='w decay rate')
     parser.add_argument('--optim', type=str, default='adamw', choices = ['sgd', 'adamw'])
-    parser.add_argument('--batch_size_train', type=int, default=100, help='Batch size for training')
-    parser.add_argument('--batch_size_test', type=int, default=100, help='Batch size for testing')
+    parser.add_argument('--batch_size_train', type=int, default=300, help='Batch size for training')
+    parser.add_argument('--batch_size_test', type=int, default=300, help='Batch size for testing')
     parser.add_argument('--data_augment', type=ast.literal_eval, default=True)
     parser.add_argument('--train_subset', type=ast.literal_eval, default=False, help='if train on the 1/13 subset of ImageNet or the full ImageNet')
     parser.add_argument('--pixel_wise', type=ast.literal_eval, default=True, help='if use pixel-wise poly replacement')
     parser.add_argument('--channel_wise', type=ast.literal_eval, default=True, help='if use channel-wise relu_poly class')
     parser.add_argument('--poly_weight_inits', nargs=3, type=float, default=[0, 1, 0], help='relu_poly weights initial values')
     parser.add_argument('--poly_weight_factors', nargs=3, type=float, default=[0.1, 1, 0.1], help='adjust the learning rate of the three weights in relu_poly')
-    parser.add_argument('--mask_decrease', type=str, default='', choices = ['0', '1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
-    parser.add_argument('--mask_epochs', default=80, type=int, help='the epoch that the relu replacing mask will decrease to 0')
+    parser.add_argument('--mask_decrease', type=str, default='e^(-x/10)', choices = ['0', '1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
+    parser.add_argument('--mask_epochs', default=30, type=int, help='the epoch that the relu replacing mask will decrease to 0')
     parser.add_argument('--loss_fm_type', type=str, default='at', choices = ['at', 'mse', 'custom_mse'], help='the type for the feature map loss')
     parser.add_argument('--loss_fm_factor', default=100, type=float, help='the factor of the feature map loss, set to 0 to disable')
     parser.add_argument('--loss_ce_factor', default=1, type=float, help='the factor of the cross-entropy loss, set to 0 to disable')
@@ -359,10 +273,6 @@ if __name__ == "__main__":
                     setattr(args, key, value)
 
     args.total_gpus = torch.cuda.device_count()
-
-    # args.lr *= args.total_gpus
-
-    # barrier = mp.Barrier(args.total_gpus)
 
     mp.spawn(process, nprocs=args.total_gpus, args=(args, ))
     
