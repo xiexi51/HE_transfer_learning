@@ -11,7 +11,7 @@ from model_poly_avg import ResNet18FullPoly, relu_fullpoly, copy_parameters
 from model_relu import ResNet18Relu
 import numpy as np
 import re
-from ddp_training import ddp_train, ddp_test
+from ddp_training import ddp_train_avg, ddp_test
 from utils import Lookahead, MaskProvider
 from datetime import datetime
 from torch.nn.parallel import DistributedDataParallel
@@ -111,7 +111,7 @@ def process(pn, args):
             print(f"Loading checkpoint: {checkpoint_path}")
             state_dict = torch.load(checkpoint_path)
             state_dict = {key: value for key, value in state_dict.items() if not key.endswith('rand_mask')}
-            model.load_state_dict(state_dict)
+            model.load_state_dict(state_dict, strict=False)
         else:
             print(f"No checkpoint found at {checkpoint_path}")
     else:
@@ -182,16 +182,16 @@ def process(pn, args):
 
     for epoch in range(start_epoch, start_epoch + t_max):
         train_sampler.set_epoch(epoch)
-        mask = mask_provider.get_mask(epoch)
+        avgmask = mask_provider.get_mask(epoch)
 
         if pn == 0:
-            print("mask = ", mask)
-            writer.add_scalar('Mask value', mask, epoch)
+            print("mask = ", avgmask)
+            writer.add_scalar('Mask value', avgmask, epoch)
         
-        train_acc = ddp_train(args, trainloader, model, model_relu, optimizer, epoch, mask, writer, pn)
+        train_acc = ddp_train_avg(args, trainloader, model, model_relu, optimizer, epoch, avgmask, writer, pn)
 
-        if mask < 0.01 or False:
-            test_acc, best_acc = ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn)
+        if avgmask < 0.01 or False:
+            test_acc, best_acc = ddp_test(args, testloader, model, epoch, best_acc, avgmask, writer, pn)
 
         if lr_scheduler is not None:
             lr_scheduler.step()

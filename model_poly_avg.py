@@ -88,6 +88,8 @@ class ResNetFullPoly(nn.Module):
 
         self.relu1 = relu_fullpoly([0, 1, 0], poly_factors, 64)
 
+        self.rand_avgmask = None
+
         self.if_forward_with_fms = False
 
     def _create_blocks(self, block, planes, num_blocks, stride):
@@ -115,7 +117,10 @@ class ResNetFullPoly(nn.Module):
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu1(out)
-        out = avgmask * self.maxpool1(out) + (1-avgmask) * self.avgpool1(out)
+        if self.rand_avgmask is None:
+            self.rand_avgmask = nn.Parameter(torch.rand(self.maxpool1(out).shape[1:], device=out.device), requires_grad=False)
+        if_max = avgmask > self.rand_avgmask
+        out = if_max.float() * self.maxpool1(out) + (1 - if_max.float()) * self.avgpool1(out)
         out = self.layer1_0(out)
         out = self.layer1_1(out)
         out = self.layer2_0(out)
