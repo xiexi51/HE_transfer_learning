@@ -186,8 +186,13 @@ def process(pn, args):
         if pn == 0:
             print("mask = ", avgmask)
             writer.add_scalar('Mask value', avgmask, epoch)
+            if isinstance(model, DistributedDataParallel):
+                total_elements, maxpool_elements = model.module.get_maxpool_remain_density(avgmask)
+            else:
+                total_elements, maxpool_elements = model.get_maxpool_remain_density(avgmask)
+            print(f"total_elements {total_elements}, maxpool_elements {maxpool_elements}, density = {maxpool_elements/total_elements}")
         
-        omit_fms = 0
+        omit_fms = 5
         train_acc = ddp_train(args, trainloader, model, model_relu, optimizer, epoch, avgmask, writer, pn, omit_fms)
 
         if avgmask < 0.01 or False:
@@ -213,7 +218,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Fully poly replacement on ResNet for ImageNet')
     parser.add_argument('--id', default=0, type=int)
     parser.add_argument('--total_epochs', default=100, type=int)
-    parser.add_argument('--lr', default=0.00005, type=float, help='learning rate')
+    parser.add_argument('--lr', default=0.0001, type=float, help='learning rate')
     parser.add_argument('--w_decay', default=0.000, type=float, help='w decay rate')
     parser.add_argument('--optim', type=str, default='adamw', choices = ['sgd', 'adamw'])
     parser.add_argument('--batch_size_train', type=int, default=300, help='Batch size for training')
@@ -224,7 +229,7 @@ if __name__ == "__main__":
     parser.add_argument('--channel_wise', type=ast.literal_eval, default=True, help='if use channel-wise relu_poly class')
     parser.add_argument('--poly_weight_inits', nargs=3, type=float, default=[0, 1, 0], help='relu_poly weights initial values')
     parser.add_argument('--poly_weight_factors', nargs=3, type=float, default=[0.1, 1, 0.1], help='adjust the learning rate of the three weights in relu_poly')
-    parser.add_argument('--mask_decrease', type=str, default='1-sinx', choices = ['0', '1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
+    parser.add_argument('--mask_decrease', type=str, default='0', choices = ['0', '1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
     parser.add_argument('--mask_epochs', default=30, type=int, help='the epoch that the relu replacing mask will decrease to 0')
     parser.add_argument('--loss_fm_type', type=str, default='at', choices = ['at', 'mse', 'custom_mse'], help='the type for the feature map loss')
     parser.add_argument('--loss_fm_factor', default=100, type=float, help='the factor of the feature map loss, set to 0 to disable')

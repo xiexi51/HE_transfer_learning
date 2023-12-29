@@ -77,9 +77,9 @@ class ResNetFullPoly(nn.Module):
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         self.maxpool1 = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.avgpool1 = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
-
-        self.channel_weight = nn.Parameter(torch.ones(64).view(1, 64, 1, 1))
+        
+        self.replace_conv = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, groups=64, bias=False)
+        nn.init.constant_(self.replace_conv.weight, 1.0 / 6.0)
 
         self.layer1_0, self.layer1_1 = self._create_blocks(block, 64, num_blocks[0], stride=1)
         self.layer2_0, self.layer2_1 = self._create_blocks(block, 128, num_blocks[1], stride=2)
@@ -126,7 +126,7 @@ class ResNetFullPoly(nn.Module):
             self.rand_avgmask = nn.Parameter(torch.rand(self.maxpool1(out).shape[1:], device=out.device), requires_grad=False)
             print(f"init rand avgmask in forward without fms, shape {self.rand_avgmask.shape}, first element {self.rand_avgmask.view(-1)[0].item()}")
         if_max = avgmask > self.rand_avgmask
-        out = if_max.float() * self.maxpool1(out) + (1 - if_max.float()) * self.avgpool1(out) * self.channel_weight
+        out = if_max.float() * self.maxpool1(out) + (1 - if_max.float()) * self.replace_conv(out)
 
         out = self.layer1_0(out)
         out = self.layer1_1(out)
@@ -152,7 +152,7 @@ class ResNetFullPoly(nn.Module):
             self.rand_avgmask = nn.Parameter(torch.rand(self.maxpool1(out).shape[1:], device=out.device), requires_grad=False)
             print(f"init rand avgmask in forward with fms, shape {self.rand_avgmask.shape}, first element {self.rand_avgmask.view(-1)[0].item()}")
         if_max = avgmask > self.rand_avgmask
-        out = if_max.float() * self.maxpool1(out) + (1 - if_max.float()) * self.avgpool1(out) * self.channel_weight
+        out = if_max.float() * self.maxpool1(out) + (1 - if_max.float()) * self.replace_conv(out)
         out, _fms = self.layer1_0.forward_with_fms(out)
         fms += _fms
         out, _fms = self.layer1_1.forward_with_fms(out)
@@ -178,6 +178,12 @@ class ResNetFullPoly(nn.Module):
         out = self.linear(out)
 
         return out, fms
+
+    def get_maxpool_remain_density(self, mask):
+        if_maxpool = mask > self.rand_avgmask
+        total_elements = self.rand_avgmask.numel()
+        maxpool_elements = if_maxpool.sum().item()
+        return total_elements, maxpool_elements
         
 def ResNet18FullPoly(poly_factors, relu2_extra_factor=1):
     return ResNetFullPoly(BasicBlockFullPoly, [2, 2, 2, 2], 1000, poly_factors, relu2_extra_factor)
