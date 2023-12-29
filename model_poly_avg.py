@@ -79,6 +79,8 @@ class ResNetFullPoly(nn.Module):
         self.maxpool1 = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.avgpool1 = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
 
+        self.channel_weight = nn.Parameter(torch.ones(64).view(1, 64, 1, 1))
+
         self.layer1_0, self.layer1_1 = self._create_blocks(block, 64, num_blocks[0], stride=1)
         self.layer2_0, self.layer2_1 = self._create_blocks(block, 128, num_blocks[1], stride=2)
         self.layer3_0, self.layer3_1 = self._create_blocks(block, 256, num_blocks[2], stride=2)
@@ -117,10 +119,15 @@ class ResNetFullPoly(nn.Module):
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu1(out)
+
+
+
         if self.rand_avgmask is None:
             self.rand_avgmask = nn.Parameter(torch.rand(self.maxpool1(out).shape[1:], device=out.device), requires_grad=False)
+            print(f"init rand avgmask in forward without fms, shape {self.rand_avgmask.shape}, first element {self.rand_avgmask.view(-1)[0].item()}")
         if_max = avgmask > self.rand_avgmask
-        out = if_max.float() * self.maxpool1(out) + (1 - if_max.float()) * self.avgpool1(out)
+        out = if_max.float() * self.maxpool1(out) + (1 - if_max.float()) * self.avgpool1(out) * self.channel_weight
+
         out = self.layer1_0(out)
         out = self.layer1_1(out)
         out = self.layer2_0(out)
@@ -141,7 +148,11 @@ class ResNetFullPoly(nn.Module):
         out = self.bn1(out)
         out = self.relu1(out)
         fms.append(out)
-        out = avgmask * self.maxpool1(out) + (1-avgmask) * self.avgpool1(out)
+        if self.rand_avgmask is None:
+            self.rand_avgmask = nn.Parameter(torch.rand(self.maxpool1(out).shape[1:], device=out.device), requires_grad=False)
+            print(f"init rand avgmask in forward with fms, shape {self.rand_avgmask.shape}, first element {self.rand_avgmask.view(-1)[0].item()}")
+        if_max = avgmask > self.rand_avgmask
+        out = if_max.float() * self.maxpool1(out) + (1 - if_max.float()) * self.avgpool1(out) * self.channel_weight
         out, _fms = self.layer1_0.forward_with_fms(out)
         fms += _fms
         out, _fms = self.layer1_1.forward_with_fms(out)

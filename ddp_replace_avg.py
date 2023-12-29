@@ -11,7 +11,7 @@ from model_poly_avg import ResNet18FullPoly, relu_fullpoly, copy_parameters
 from model_relu import ResNet18Relu
 import numpy as np
 import re
-from ddp_training import ddp_train_avg, ddp_test
+from ddp_training import ddp_train, ddp_test
 from utils import Lookahead, MaskProvider
 from datetime import datetime
 from torch.nn.parallel import DistributedDataParallel
@@ -20,10 +20,10 @@ import torch.multiprocessing as mp
 
 def process(pn, args):
     torch.cuda.set_device(pn)
-    process_group = torch.distributed.init_process_group(backend="nccl", init_method='env://', world_size=args.total_gpus, rank=pn)
-
     torch.manual_seed(10)
     torch.cuda.manual_seed_all(10)
+
+    process_group = torch.distributed.init_process_group(backend="nccl", init_method='env://', world_size=args.total_gpus, rank=pn)
 
     t_max = args.total_epochs
     best_acc = 0  # best test accuracy
@@ -133,7 +133,6 @@ def process(pn, args):
         param.requires_grad = False
     
     model = DistributedDataParallel(model, device_ids=[pn])
-
     optimizer = optim.AdamW(model.parameters(), lr = args.lr, weight_decay=args.w_decay)
 
     if args.lookahead:
@@ -188,7 +187,8 @@ def process(pn, args):
             print("mask = ", avgmask)
             writer.add_scalar('Mask value', avgmask, epoch)
         
-        train_acc = ddp_train_avg(args, trainloader, model, model_relu, optimizer, epoch, avgmask, writer, pn)
+        omit_fms = 0
+        train_acc = ddp_train(args, trainloader, model, model_relu, optimizer, epoch, avgmask, writer, pn, omit_fms)
 
         if avgmask < 0.01 or False:
             test_acc, best_acc = ddp_test(args, testloader, model, epoch, best_acc, avgmask, writer, pn)
@@ -224,7 +224,7 @@ if __name__ == "__main__":
     parser.add_argument('--channel_wise', type=ast.literal_eval, default=True, help='if use channel-wise relu_poly class')
     parser.add_argument('--poly_weight_inits', nargs=3, type=float, default=[0, 1, 0], help='relu_poly weights initial values')
     parser.add_argument('--poly_weight_factors', nargs=3, type=float, default=[0.1, 1, 0.1], help='adjust the learning rate of the three weights in relu_poly')
-    parser.add_argument('--mask_decrease', type=str, default='e^(-x/10)', choices = ['0', '1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
+    parser.add_argument('--mask_decrease', type=str, default='1-sinx', choices = ['0', '1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
     parser.add_argument('--mask_epochs', default=30, type=int, help='the epoch that the relu replacing mask will decrease to 0')
     parser.add_argument('--loss_fm_type', type=str, default='at', choices = ['at', 'mse', 'custom_mse'], help='the type for the feature map loss')
     parser.add_argument('--loss_fm_factor', default=100, type=float, help='the factor of the feature map loss, set to 0 to disable')
