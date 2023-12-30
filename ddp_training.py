@@ -1,9 +1,10 @@
 import torch
 from tqdm import tqdm
 import torch.nn as nn
-from utils import custom_mse_loss, at_loss, SoftTarget, accuracy
+from utils import custom_mse_loss, at_loss, irg_loss, SoftTarget, accuracy
 from torch.nn.parallel import DistributedDataParallel
 import torch.distributed as dist
+import warnings
 
 def ddp_train(args, trainloader, model_s, model_t, optimizer, epoch, mask, writer, pn, omit_fms):
     # model_s.train_fz_bn()
@@ -29,8 +30,11 @@ def ddp_train(args, trainloader, model_s, model_t, optimizer, epoch, mask, write
         loss_fm_fun = nn.MSELoss()
     elif args.loss_fm_type == "custom_mse":
         loss_fm_fun = custom_mse_loss
-    else:
+    elif args.loss_fm_type == "at":
         loss_fm_fun = at_loss
+    else:
+        loss_fm_fun = irg_loss
+
 
     criterion_kd = SoftTarget(4.0).cuda()
     criterion_ce = nn.CrossEntropyLoss()
@@ -171,6 +175,7 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn):
         top5_total += top5[0] * x.size(0)
         total += x.size(0)
 
+        
         reduced_total = torch.tensor(total, dtype=torch.float).cuda().detach()
         reduced_top1_total = torch.tensor(top1_total, dtype=torch.float).cuda().detach()
         reduced_top5_total = torch.tensor(top5_total, dtype=torch.float).cuda().detach()

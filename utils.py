@@ -177,3 +177,55 @@ def fp16_compress_hook(
         return decompressed_tensor
 
     return fut.then(decompress)
+
+def irg_loss(fms_s, fms_t, w_irg_vert=0.1, w_irg_edge=5.0, w_irg_tran=5.0):
+    def euclidean_dist_fms(fm1, fm2, squared=False, eps=1e-12):
+        '''
+        Calculating the IRG Transformation, where fm1 precedes fm2 in the network.
+        '''
+        if fm1.size(2) > fm2.size(2):
+            fm1 = F.adaptive_avg_pool2d(fm1, (fm2.size(2), fm2.size(3)))
+        if fm1.size(1) < fm2.size(1):
+            fm2 = (fm2[:,0::2,:,:] + fm2[:,1::2,:,:]) / 2.0
+
+        fm1 = fm1.view(fm1.size(0), -1)
+        fm2 = fm2.view(fm2.size(0), -1)
+        fms_dist = torch.sum(torch.pow(fm1-fm2, 2), dim=-1).clamp(min=eps)
+
+        if not squared:
+            fms_dist = fms_dist.sqrt()
+
+        fms_dist = fms_dist / fms_dist.max()
+
+        return fms_dist
+
+    def euclidean_dist_fm(fm, squared=False, eps=1e-12): 
+        '''
+        Calculating the IRG edge of feature map. 
+        '''
+        fm = fm.view(fm.size(0), -1)
+        fm_square = fm.pow(2).sum(dim=1)
+        fm_prod   = torch.mm(fm, fm.t())
+        fm_dist   = (fm_square.unsqueeze(0) + fm_square.unsqueeze(1) - 2 * fm_prod).clamp(min=eps)
+
+        if not squared:
+            fm_dist = fm_dist.sqrt()
+
+        fm_dist = fm_dist.clone()
+        fm_dist[range(len(fm)), range(len(fm))] = 0
+        fm_dist = fm_dist / fm_dist.max()
+
+        return fm_dist
+
+    # Assuming the feature maps are paired correctly in the lists
+    loss_irg_vert = sum(F.mse_loss(fm_s, fm_t) for fm_s, fm_t in zip(fms_s, fms_t)) / len(fms_s)
+
+    loss_irg_edge = sum(F.mse_loss(euclidean_dist_fm(fm_s), euclidean_dist_fm(fm_t)) for fm_s, fm_t in zip(fms_s, fms_t)) / len(fms_s)
+
+    # Assuming adjacent feature maps are used for transformation calculation
+    loss_irg_tran = sum(F.mse_loss(euclidean_dist_fms(fms_s[i], fms_s[i+1]), euclidean_dist_fms(fms_t[i], fms_t[i+1])) 
+                        for i in range(len(fms_s) - 1)) / (len(fms_s) - 1)
+
+    loss = w_irg_vert * loss_irg_vert + w_irg_edge * loss_irg_edge + w_irg_tran * loss_irg_tran
+
+    return loss
