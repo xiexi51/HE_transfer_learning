@@ -118,9 +118,8 @@ def process(pn, args):
         raise KeyError("The replacement of avgpool should only be conducted when args.reload = True")
         
 
-    model_relu = ResNet18Relu()
-    
-    copy_parameters(pretrain_model, model_relu)   
+    model_teacher = ResNet18FullPoly([0.1, 1, 0.1])
+    torch.load("/home/uconn/xiexi/poly_replace_success_backup/runs20231225035445")
 
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     

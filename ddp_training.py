@@ -30,10 +30,9 @@ def ddp_train(args, trainloader, model_s, model_t, optimizer, epoch, mask, write
         loss_fm_fun = nn.MSELoss()
     elif args.loss_fm_type == "custom_mse":
         loss_fm_fun = custom_mse_loss
-    elif args.loss_fm_type == "at":
-        loss_fm_fun = at_loss
     else:
-        loss_fm_fun = irg_loss
+        loss_fm_fun = at_loss
+    
 
 
     criterion_kd = SoftTarget(4.0).cuda()

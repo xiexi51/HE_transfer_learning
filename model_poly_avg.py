@@ -120,8 +120,6 @@ class ResNetFullPoly(nn.Module):
         out = self.bn1(out)
         out = self.relu1(out)
 
-
-
         if self.rand_avgmask is None:
             self.rand_avgmask = nn.Parameter(torch.rand(self.maxpool1(out).shape[1:], device=out.device), requires_grad=False)
             print(f"init rand avgmask in forward without fms, shape {self.rand_avgmask.shape}, first element {self.rand_avgmask.view(-1)[0].item()}")
