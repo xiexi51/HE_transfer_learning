@@ -9,7 +9,8 @@ import warnings
 def ddp_train(args, trainloader, model_s, model_t, optimizer, epoch, mask, writer, pn, omit_fms):
     # model_s.train_fz_bn()
     model_s.train()
-    model_t.eval()
+    if model_t is not None:
+        model_t.eval()
     # model_t.train()
 
     train_loss = 0
@@ -25,6 +26,10 @@ def ddp_train(args, trainloader, model_s, model_t, optimizer, epoch, mask, write
     top1_total = 0
     top5_total = 0
     total = 0
+
+    reduced_total = 0
+    reduced_top1_total = 0
+    reduced_top5_total = 0
 
     if args.loss_fm_type == "mse":
         loss_fm_fun = nn.MSELoss()
@@ -67,7 +72,10 @@ def ddp_train(args, trainloader, model_s, model_t, optimizer, epoch, mask, write
                 model_s.module.if_forward_with_fms = False
             else:
                 model_s.if_forward_with_fms = False
-            out_s = model_s((x, mask))
+            if mask is not None:
+                out_s = model_s((x, mask))
+            else:
+                out_s = model_s(x)
 
         # torch.save(out_t, f'{pn}_out_t.pt')
         # torch.save(fms_t, f'{pn}_fms_t.pt')
@@ -134,7 +142,7 @@ def ddp_train(args, trainloader, model_s, model_t, optimizer, epoch, mask, write
             pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e}, 1a {100*reduced_top1_total/reduced_total:.1f}, 5a {100*reduced_top5_total/reduced_total:.1f}")
 
 
-    train_acc = (top1_total / total).item()
+    train_acc = (reduced_top1_total / reduced_total).item()
 
     if writer is not None:
         writer.add_scalar('Accuracy/train', train_acc, epoch)
@@ -188,7 +196,8 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn):
 
         if args.pbar and pn == 0:
             pbar.set_postfix_str(f"1a {100*reduced_top1_total/reduced_total:.2f}, 5a {100*reduced_top5_total/reduced_total:.2f}, best {100*best_acc:.2f}")
-            test_acc = reduced_top1_total/reduced_total
+        
+        test_acc = reduced_top1_total/reduced_total
 
     # test_acc = (top1_total / total).item()
     if writer is not None:
