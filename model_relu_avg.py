@@ -67,8 +67,8 @@ class ResNetReluAvg(nn.Module):
 
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
-        self.maxpool1 = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        # self.avgpool1 = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
+        # self.maxpool1 = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.avgpool1 = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
 
         self.layer1_0, self.layer1_1 = self._create_blocks(block, 64, num_blocks[0], stride=1)
         self.layer2_0, self.layer2_1 = self._create_blocks(block, 128, num_blocks[1], stride=2)
@@ -98,7 +98,7 @@ class ResNetReluAvg(nn.Module):
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu1(out)
-        out = self.maxpool1(out)
+        out = self.avgpool1(out)
         out = self.layer1_0(out)
         out = self.layer1_1(out)
         out = self.layer2_0(out)

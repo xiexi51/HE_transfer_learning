@@ -18,6 +18,11 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data.distributed import DistributedSampler
 import torch.multiprocessing as mp
 
+def adjust_learning_rate(optimizer, epoch, init_lr):
+    """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
+    lr = init_lr * (0.1 ** (epoch // 30))
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
 
 def process(pn, args):
     torch.cuda.set_device(pn)
@@ -180,7 +185,7 @@ def process(pn, args):
     if args.optim == 'adamw':
         optimizer = optim.AdamW(model.parameters(), lr = args.lr, weight_decay=args.w_decay)
     else:
-        optimizer = optim.SGD(model.parameters(), lr = 0.01, momentum=0.9, weight_decay=args.w_decay)
+        optimizer = optim.SGD(model.parameters(), lr = 0.1, momentum=0.9, weight_decay=args.w_decay)
 
     if args.lookahead:
         optimizer = Lookahead(optimizer)
@@ -236,12 +241,14 @@ def process(pn, args):
         test_acc, best_acc = ddp_test(args, testloader, model, args.resume_epoch, best_acc, None, writer, pn)
 
     for epoch in range(start_epoch, args.total_epochs):
+        adjust_learning_rate(optimizer, epoch, args.lr)
+
         train_sampler.set_epoch(epoch)
         mask = mask_provider.get_mask(epoch)
         
         train_acc = ddp_train(args, trainloader, model, None, optimizer, epoch, None, writer, pn, 0)
 
-        if train_acc > 0.6 or False:
+        if train_acc > 0.6 or True:
             test_acc, best_acc = ddp_test(args, testloader, model, epoch, best_acc, None, writer, pn)
 
         # barrier.wait()
@@ -283,10 +290,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Fully poly replacement for ResNet on ImageNet')
     parser.add_argument('--id', default=0, type=int)
     parser.add_argument('--total_epochs', default=100, type=int)
-    parser.add_argument('--lr', default=0.001, type=float, help='learning rate')
+    parser.add_argument('--lr', default=0.4, type=float, help='learning rate')
     parser.add_argument('--w_decay', default=1e-4, type=float, help='w decay rate')
-    parser.add_argument('--optim', type=str, default='adamw', choices = ['sgd', 'adamw'])
-    parser.add_argument('--batch_size_train', type=int, default=100, help='Batch size for training')
+    parser.add_argument('--optim', type=str, default='sgd', choices = ['sgd', 'adamw'])
+    parser.add_argument('--batch_size_train', type=int, default=200, help='Batch size for training')
     parser.add_argument('--batch_size_test', type=int, default=500, help='Batch size for testing')
     parser.add_argument('--data_augment', type=ast.literal_eval, default=True)
     parser.add_argument('--train_subset', type=ast.literal_eval, default=False, help='if train on the 1/13 subset of ImageNet or the full ImageNet')
@@ -301,11 +308,11 @@ if __name__ == "__main__":
     parser.add_argument('--loss_ce_factor', default=1, type=float, help='the factor of the cross-entropy loss, set to 0 to disable')
     parser.add_argument('--loss_kd_factor', default=0, type=float, help='the factor of the knowledge distillation loss, set to 0 to disable')
     parser.add_argument('--lookahead', type=ast.literal_eval, default=False, help='if enable look ahead for the optimizer')
-    parser.add_argument('--lr_anneal', type=str, default='cos', choices = ['None', 'cos'])
+    parser.add_argument('--lr_anneal', type=str, default='None', choices = ['None', 'cos'])
     parser.add_argument('--bf16', type=ast.literal_eval, default=False, help='if enable training with bf16 precision')
     parser.add_argument('--fp16', type=ast.literal_eval, default=False, help='if enable training with float16 precision')
     
-    parser.add_argument('--num_workers', type=int, default=12)
+    parser.add_argument('--num_workers', type=int, default=8)
     parser.add_argument('--pbar', type=ast.literal_eval, default=True)
     parser.add_argument('--log_root', type=str)
 
