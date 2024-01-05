@@ -8,16 +8,22 @@ import argparse
 from torch.utils.tensorboard import SummaryWriter
 import ast
 from model import ResNet18Poly, general_relu_poly, convert_to_bf16_except_bn, find_submodule, copy_parameters
+from model_relu_avg import ResNet18ReluAvg
 from model_relu import ResNet18Relu
 import numpy as np
 import re
-from ddp_training import ddp_train, ddp_test
+from ddp_training import ddp_train, ddp_test, single_test
 from utils import Lookahead, MaskProvider
 from datetime import datetime
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data.distributed import DistributedSampler
 import torch.multiprocessing as mp
+import torch.distributed as dist
 
+def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
+    lr = init_lr * (lr_gamma ** (epoch // lr_step_size))
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
 
 def process(pn, args):
     torch.cuda.set_device(pn)
@@ -26,7 +32,6 @@ def process(pn, args):
     torch.manual_seed(10)
     torch.cuda.manual_seed_all(10)
 
-    t_max = args.total_epochs
     best_acc = 0  # best test accuracy
     start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 
@@ -42,12 +47,9 @@ def process(pn, args):
     if pn == 0:
         print("gpu count =", torch.cuda.device_count())
     
-    # args.batch_size_train *= torch.cuda.device_count()
-    # args.batch_size_test *= torch.cuda.device_count()
-    
     if args.data_augment:
         transform_train = transforms.Compose([
-            transforms.RandomResizedCrop(224),
+            transforms.RandomResizedCrop(224, antialias=True),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
@@ -61,7 +63,7 @@ def process(pn, args):
             ])
 
     transform_test = transforms.Compose([
-        transforms.Resize(256),
+        transforms.Resize(256, antialias=True),
         transforms.CenterCrop(224),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
@@ -74,27 +76,40 @@ def process(pn, args):
     
 
     train_sampler = DistributedSampler(trainset, num_replicas=args.total_gpus, rank=pn)
-    trainloader = torch.utils.data.DataLoader(trainset, sampler=train_sampler, batch_size=args.batch_size_train, num_workers=args.num_workers, pin_memory=True, shuffle=False)
+    trainloader = torch.utils.data.DataLoader(trainset, sampler=train_sampler, batch_size=args.batch_size_train, num_workers=args.num_train_loader_workers, pin_memory=True, shuffle=False)
 
     
     testset = torchvision.datasets.ImageFolder(
         root='/home/uconn/dataset/imagenet/val', transform=transform_test)
     
     test_sampler = DistributedSampler(testset, num_replicas=args.total_gpus, rank=pn)
-    testloader = torch.utils.data.DataLoader(testset, sampler=test_sampler, batch_size=args.batch_size_test, num_workers=args.num_workers, pin_memory=True, shuffle=False)
-    # testloader = torch.utils.data.DataLoader(testset, batch_size = args.batch_size_test, shuffle=False, num_workers=args.num_workers, pin_memory=True)
+    testloader = torch.utils.data.DataLoader(testset, sampler=test_sampler, batch_size=args.batch_size_test, num_workers=args.num_test_loader_workers, pin_memory=True, shuffle=False)
+    testloader_single = torch.utils.data.DataLoader(testset, batch_size = args.batch_size_test, shuffle=False, num_workers=args.num_test_loader_workers, pin_memory=True)
 
     model = ResNet18Poly(args.channel_wise, args.pixel_wise, args.poly_weight_inits, args.poly_weight_factors, relu2_extra_factor=1)
 
     dummy_input = torch.rand(1, 3, 224, 224) 
     model((dummy_input, 0))
 
-    pretrain_model = torchvision.models.resnet18(weights=ResNet18_Weights.DEFAULT)
+    # pretrain_model = torchvision.models.resnet18(weights=ResNet18_Weights.DEFAULT)
+
+    model_relu_avg = ResNet18ReluAvg()
+    checkpoint_relu_avg = torch.load("/home/uconn/xiexi/HE_transfer_learning/runs20240101163300/checkpoint_epoch_79.pth")
+    model_relu_avg.load_state_dict(checkpoint_relu_avg['model_state_dict'])
+    model_relu_avg = model_relu_avg.cuda()
+
+    # model_relu = ResNet18Relu()
+    # copy_parameters(pretrain_model, model_relu)
+    # model_relu = model_relu.cuda()
+
+    # model_relu_avg = model_relu
+
+    checkpoint = None
 
     def find_latest_epoch(resume_dir):
         max_epoch = -1
         for filename in os.listdir(resume_dir):
-            match = re.match(r'model_epoch_(\d+)\.pth', filename)
+            match = re.match(r'checkpoint_epoch_(\d+)\.pth', filename)
             if match:
                 epoch = int(match.group(1))
                 if epoch > max_epoch:
@@ -106,95 +121,47 @@ def process(pn, args):
             if args.resume_epoch is None:
                 start_epoch = find_latest_epoch(args.resume_dir) + 1
             else:
-                start_epoch = args.resume_epoch    
-            t_max = args.total_epochs - start_epoch
-            checkpoint_path = os.path.join(args.resume_dir, f'model_epoch_{start_epoch - 1}.pth')
+                start_epoch = args.resume_epoch + 1
+            checkpoint_path = os.path.join(args.resume_dir, f'checkpoint_epoch_{start_epoch - 1}.pth')
         else:
-            checkpoint_path = os.path.join(args.resume_dir, f'model_epoch_{args.resume_epoch}.pth')
+            checkpoint_path = os.path.join(args.resume_dir, f'checkpoint_epoch_{args.resume_epoch}.pth')
 
         if checkpoint_path and os.path.exists(checkpoint_path):
             print(f"Loading checkpoint: {checkpoint_path}")
-            state_dict = torch.load(checkpoint_path)
-            model.load_state_dict(state_dict, strict=False)
+            checkpoint = torch.load(checkpoint_path)
+            model.load_state_dict(checkpoint['model_state_dict'], strict=True)
         else:
             print(f"No checkpoint found at {checkpoint_path}")
     else:
-        copy_parameters(pretrain_model, model) 
+        model.load_state_dict(checkpoint_relu_avg['model_state_dict'], strict=False)
+        # copy_parameters(pretrain_model, model) 
         # model.load_state_dict(torch.load("default_poly_model.pth"))
+        # initialize_resnet(model)
 
-    # model = model.cuda()
-
-    # writer = SummaryWriter(log_dir=args.resume_dir)
-
-    # # test(args, testloader, model, 80, 0, 0, writer)
-    
-    # mask_x = np.linspace(0, 80, args.mask_epochs)[1:]
-    # mask_y = np.exp(-mask_x / 10)
-    
-    # for epoch in range(22, 100):
-    #     mask = mask_y[epoch - 0]
-    #     model.load_state_dict(torch.load(os.path.join(args.resume_dir, f'model_epoch_{epoch}.pth')))
-    #     test(args, testloader, model, epoch, 0, mask, writer)
-
-    # initialize_resnet(model)
-
-    model_relu = ResNet18Relu()
-    
-    copy_parameters(pretrain_model, model_relu)   
-    
-    # tmp_test_acc = 0
-    # test(pretrain_model.cuda(), 0, tmp_test_acc, None)
-    # tmp_test_acc = 0
-    # test(model.cuda(), 0, tmp_test_acc, 1)
-
-    # pretrain_model = pretrain_model.cuda()
 
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+
+    # tmp_test_acc = 0
+    # if pn == 0:
+    #     single_test(args, testloader_single, model.cuda(), 0, tmp_test_acc, 1)
+    # dist.barrier()
     
     model = model.cuda()
     model.eval()
 
-    model_relu = model_relu.cuda()
-
-    for param in model_relu.parameters():
+    for param in model_relu_avg.parameters():
         param.requires_grad = False
     
     model = DistributedDataParallel(model, device_ids=[pn])
-    # model_relu = DistributedDataParallel(model_relu, device_ids=[pn])
 
+    # if args.bf16:
+    #     model = convert_to_bf16_except_bn(model)
+    #     model_relu = convert_to_bf16_except_bn(model_relu)
 
-    if args.bf16:
-        model = convert_to_bf16_except_bn(model)
-        model_relu = convert_to_bf16_except_bn(model_relu)
-
-    # relu_poly_params = []
-    # other_params = []
-
-    # for name, param in model.named_parameters():
-    #     submodule_name = '.'.join(name.split('.')[:-1])
-    #     submodule = find_submodule(model, submodule_name)
-        
-    #     if isinstance(submodule, general_relu_poly):
-    #         relu_poly_params.append(param)
-    #     else:
-    #         other_params.append(param)
-
-    # optimizer_params = [
-    #     {'params': relu_poly_params, 'lr': args.lr},
-    #     {'params': other_params, 'lr': args.lr}
-    # ]
-
-    # i = 0
-    # for param_group in optimizer_params:
-    #     lr = param_group['lr'] 
-    #     for p in param_group['params']:
-    #         i += 1
-    #         print(f"{i} Param Name: {p.shape}, Learning Rate: {lr}")
-    
-    # optimizer = optim.AdamW(optimizer_params)
-
-    # optimizer = optim.AdamW(param_groups)
-    optimizer = optim.AdamW(model.parameters(), lr = args.lr, weight_decay=args.w_decay)
+    if args.optim == 'adamw':
+        optimizer = optim.AdamW(model.parameters(), lr = args.lr, weight_decay=args.w_decay)
+    else:
+        optimizer = optim.SGD(model.parameters(), lr = args.lr, momentum=args.momentum, weight_decay=args.w_decay)
 
     if args.lookahead:
         optimizer = Lookahead(optimizer)
@@ -202,18 +169,24 @@ def process(pn, args):
     if args.lr_anneal is None or args.lr_anneal == "None":
         lr_scheduler = None
     elif args.lr_anneal == "cos":
-        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=t_max)
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.total_epochs)
+
+    assert not(lr_scheduler is not None and args.lr_step_size > 0), "should not use both lr_anneal and lr_step"
 
     # scaler = torch.cuda.amp.GradScaler(enabled=args.bf16 or args.fp16)
 
-    if args.resume and args.resume_dir:
-        log_root = args.resume_dir
+    current_datetime = datetime.now().strftime('%Y%m%d%H%M%S')
+    if args.log_root:
+        log_root = args.log_root
     else:
-        current_datetime = datetime.now().strftime('%Y%m%d%H%M%S')
-        if args.log_root:
-            log_root = args.log_root
-        else:
-            log_root = 'runs' + current_datetime
+        log_root = 'runs' + current_datetime
+    if args.resume and args.resume_dir:
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if lr_scheduler is not None:
+            lr_scheduler.load_state_dict(checkpoint['lr_scheduler_state_dict'])
+        assert checkpoint['epoch'] + 1 == start_epoch
+        if args.resume_log_root:
+            log_root = args.resume_dir    
 
     log_dir = log_root
     
@@ -235,21 +208,26 @@ def process(pn, args):
     values_list = [str(value) for key, value in vars(args).items()]
     print_prefix = ' '.join(values_list)
 
-    # model.register_comm_hook(process_group, fp16_compress_hook)
-
     # if pn == 0:
-    #     print(start_epoch, t_max)
+    #     print(start_epoch)
     #     for arg, value in vars(args).items():
     #         print(f"{arg}: {value}")
-    if args.reload:
-        test_acc, best_acc = ddp_test(args, testloader, model, args.resume_epoch, best_acc, mask_provider.get_mask(args.resume_epoch), writer, pn)
 
-    for epoch in range(start_epoch, start_epoch + t_max):
+    test_acc = 0
+    best_acc = 0
+    if args.reload or args.resume:
+        if start_epoch == 0:
+            _test_epoch = 0
+        else:
+            _test_epoch = start_epoch - 1
+        test_acc, best_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, mask_provider.get_mask(_test_epoch), writer, pn)
+
+    for epoch in range(start_epoch, args.total_epochs):
+        if args.lr_step_size > 0:
+            adjust_learning_rate(optimizer, epoch, args.lr, args.lr_step_size, args.lr_gamma)
+
         train_sampler.set_epoch(epoch)
         mask = mask_provider.get_mask(epoch)
-
-        # mask = 1
-        # mask = 0
 
         if pn == 0:
             print("mask = ", mask)
@@ -261,32 +239,31 @@ def process(pn, args):
                     total_elements, relu_elements = model.get_relu_density(mask)
                 print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
         
-        # print(f"pn {pn} reach before barrier")
-        # barrier.wait()
-        # print(f"pn {pn} reach after barrier")
-        
-        train_acc = ddp_train(args, trainloader, model, model_relu, optimizer, epoch, mask, writer, pn, 0)
+        train_acc = ddp_train(args, trainloader, model, model_relu_avg, optimizer, epoch, mask, writer, pn, 0)
 
         if mask < 0.01 or False:
             test_acc, best_acc = ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn)
 
-        # barrier.wait()
-
-        # print(f"epoch {epoch}, pn {pn}, train_acc = {train_acc*100:.2f}")
-
         if lr_scheduler is not None:
             lr_scheduler.step()
-        # if train_acc > 0.5:
         
-            # barrier.wait()
-            # print(f"epoch {epoch}, pn {pn}, test_acc = {test_acc*100:.2f}, test_best = {best_acc*100:.2f}")
-
-        # Save the model after each epoch
         if pn == 0:
-            if isinstance(model, DistributedDataParallel):
-                torch.save(model.module.state_dict(), f"{log_dir}/model_epoch_{epoch}.pth")
+            if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+                model_state_dict = model.module.state_dict()
             else:
-                torch.save(model.state_dict(), f"{log_dir}/model_epoch_{epoch}.pth")
+                model_state_dict = model.state_dict()
+            if lr_scheduler is None:
+                lr_scheduler_state_dict = None
+            else:
+                lr_scheduler_state_dict = lr_scheduler.state_dict()
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model_state_dict,
+                'optimizer_state_dict': optimizer.state_dict(),
+                'lr_scheduler_state_dict': lr_scheduler_state_dict,
+            }, f"{log_dir}/checkpoint_epoch_{epoch}.pth")
+            with open(f"{log_dir}/acc.txt", 'a') as file:
+                file.write(f'{epoch} train {train_acc:.2f} test {test_acc:.2f} best {best_acc:.2f}\n')
 
     if writer is not None:
         writer.close()
@@ -299,10 +276,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Fully poly replacement on ResNet for ImageNet')
     parser.add_argument('--id', default=0, type=int)
     parser.add_argument('--total_epochs', default=200, type=int)
-    parser.add_argument('--lr', default=0.0005, type=float, help='learning rate')
-    parser.add_argument('--w_decay', default=0.000, type=float, help='w decay rate')
+    parser.add_argument('--lr', default=0.0008, type=float, help='learning rate')
+    parser.add_argument('--momentum', default=0.9, type=float)
+    parser.add_argument('--w_decay', default=0e-4, type=float, help='w decay rate')
     parser.add_argument('--optim', type=str, default='adamw', choices = ['sgd', 'adamw'])
-    parser.add_argument('--batch_size_train', type=int, default=250, help='Batch size for training')
+    parser.add_argument('--batch_size_train', type=int, default=343, help='Batch size for training')
     parser.add_argument('--batch_size_test', type=int, default=500, help='Batch size for testing')
     parser.add_argument('--data_augment', type=ast.literal_eval, default=True)
     parser.add_argument('--train_subset', type=ast.literal_eval, default=False, help='if train on the 1/13 subset of ImageNet or the full ImageNet')
@@ -318,16 +296,21 @@ if __name__ == "__main__":
     parser.add_argument('--loss_kd_factor', default=0.1, type=float, help='the factor of the knowledge distillation loss, set to 0 to disable')
     parser.add_argument('--lookahead', type=ast.literal_eval, default=True, help='if enable look ahead for the optimizer')
     parser.add_argument('--lr_anneal', type=str, default='None', choices = ['None', 'cos'])
+    parser.add_argument('--lr_step_size', type=int, default=100, help="decrease lr every step-size epochs")
+    parser.add_argument('--lr_gamma', type=float, default=0.2, help="decrease lr by a factor of lr-gamma")
+
     parser.add_argument('--bf16', type=ast.literal_eval, default=False, help='if enable training with bf16 precision')
     parser.add_argument('--fp16', type=ast.literal_eval, default=False, help='if enable training with float16 precision')
     
-    parser.add_argument('--num_workers', type=int, default=5)
+    parser.add_argument('--num_train_loader_workers', type=int, default=5)
+    parser.add_argument('--num_test_loader_workers', type=int, default=5)
     parser.add_argument('--pbar', type=ast.literal_eval, default=True)
     parser.add_argument('--log_root', type=str)
 
     parser.add_argument('--resume', type=ast.literal_eval, default=False)
     parser.add_argument('--resume_dir', type=str)
     parser.add_argument('--resume_epoch', type=int, default=None)
+    parser.add_argument('--resume_log_root', type=ast.literal_eval, default=False)
 
     parser.add_argument('--reload', type=ast.literal_eval, default=False)
 
@@ -349,6 +332,7 @@ if __name__ == "__main__":
             for line in file:
                 key, value = parse_args_line(line.strip())
                 if key in ['pixel_wise', 'channel_wise', 'poly_weight_factors']:
+
                     setattr(args, key, value)
     elif args.resume:
         args_file = args.resume_dir + '/args.txt'
@@ -356,13 +340,10 @@ if __name__ == "__main__":
             for line in file:
                 key, value = parse_args_line(line.strip())
                 if hasattr(args, key) and not key.startswith('resume') and not key.startswith('reload'):
-                    setattr(args, key, value)
+                    if not key.startswith('batch_size') and not key == 'lr' and not key.startswith('num_train_loader'):
+                        setattr(args, key, value)
 
     args.total_gpus = torch.cuda.device_count()
-
-    # args.lr *= args.total_gpus
-
-    # barrier = mp.Barrier(args.total_gpus)
 
     mp.spawn(process, nprocs=args.total_gpus, args=(args, ))
     

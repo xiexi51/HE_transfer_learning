@@ -91,7 +91,10 @@ class ResNetReluAvg(nn.Module):
 
 
     def forward(self, x):
-        return self.forward_without_fms(x)  
+        if self.if_forward_with_fms:
+            return self.forward_with_fms(x)
+        else:
+            return self.forward_without_fms(x)  
 
     def forward_without_fms(self, x):
 
@@ -118,8 +121,9 @@ class ResNetReluAvg(nn.Module):
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu1(out)
-        out = self.maxpool1(out)
         fms.append(out)
+        
+        out = self.avgpool1(out)    
 
         out, _fms = self.layer1_0.forward_with_fms(out)
         fms += _fms

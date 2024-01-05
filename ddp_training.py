@@ -207,3 +207,43 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn):
         best_acc = test_acc
 
     return test_acc, best_acc
+
+def single_test(args, testloader, model, epoch, best_acc, mask):
+    model.eval()
+    top1_total = 0
+    top5_total = 0
+    total = 0
+    if args.pbar:
+        pbar = tqdm(testloader, total=len(testloader), desc=f"Epo {epoch} Testing", ncols=100)
+    else:
+        pbar = testloader
+
+    test_acc = 0
+    for x, y in pbar:
+        x, y = x.cuda(), y.cuda()
+        with torch.no_grad():
+            if isinstance(model, DistributedDataParallel):
+                raise TypeError("should not use DistributedDataParallel model in single_test")
+            else:
+                model.if_forward_with_fms = True
+            if mask is not None:
+                out, fms = model((x, mask))
+            else:
+                out, fms = model(x)
+        top1, top5 = accuracy(out, y, topk=(1, 5))
+        top1_total += top1[0] * x.size(0)
+        top5_total += top5[0] * x.size(0)
+        total += x.size(0)
+
+        if args.pbar:
+            pbar.set_postfix_str(f"1a {100*top1_total/total:.2f}, 5a {100*top5_total/total:.2f}, best {100*best_acc:.2f}")
+        
+        test_acc = top1_total/total
+
+    # if writer is not None:
+    #     writer.add_scalar('Accuracy/test', test_acc, epoch)
+    
+    if test_acc > best_acc:
+        best_acc = test_acc
+
+    return test_acc, best_acc

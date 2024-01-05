@@ -119,10 +119,10 @@ class ResNetPoly(nn.Module):
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
 
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        # self.avgpool1 = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
-        self.replace_conv = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, groups=64, bias=False)
-        nn.init.constant_(self.replace_conv.weight, 1.0 / 7.0)
+        # self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.avgpool1 = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
+        # self.replace_conv = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, groups=64, bias=False)
+        # nn.init.constant_(self.replace_conv.weight, 1.0 / 7.0)
 
         self.layer1_0, self.layer1_1 = self._create_blocks(block, 64, num_blocks[0], stride=1)
         self.layer2_0, self.layer2_1 = self._create_blocks(block, 128, num_blocks[1], stride=2)
@@ -131,9 +131,9 @@ class ResNetPoly(nn.Module):
 
         self.linear = nn.Linear(512*block.expansion, num_classes)
 
-        self.relu1 = general_relu_poly(if_channel, if_pixel, poly_weight_inits, [0.15, 1, 0.1], 64)
+        self.relu1 = general_relu_poly(if_channel, if_pixel, poly_weight_inits, poly_factors, 64)
 
-        self.rand_maxpool_mask = None
+        # self.rand_maxpool_mask = None
 
         self.if_forward_with_fms = False
 
@@ -169,18 +169,23 @@ class ResNetPoly(nn.Module):
         out = self.conv1(x)
         out = self.bn1(out)
         
-        out_origin = self.maxpool(F.relu(out))
+        # out_origin = self.maxpool(F.relu(out))
 
-        out_poly = self.relu1(self.replace_conv(out), None)
+        # out_poly = self.relu1(self.replace_conv(out), None)
 
-        if self.rand_maxpool_mask is None:
-            self.rand_maxpool_mask = nn.Parameter(torch.rand(out_origin.shape[1:], device=out_origin.device), requires_grad=False)
-            print(f"init rand_maxpool_mask, shape {self.rand_maxpool_mask.shape}, first element {self.rand_maxpool_mask.view(-1)[0].item()}")
-        if_max = mask > self.rand_maxpool_mask
-        out = if_max.float() * out_origin + (1 - if_max.float()) * out_poly
+        # if self.rand_maxpool_mask is None:
+        #     self.rand_maxpool_mask = nn.Parameter(torch.rand(out_origin.shape[1:], device=out_origin.device), requires_grad=False)
+        #     print(f"init rand_maxpool_mask, shape {self.rand_maxpool_mask.shape}, first element {self.rand_maxpool_mask.view(-1)[0].item()}")
+        # if_max = mask > self.rand_maxpool_mask
+        # out = if_max.float() * out_origin + (1 - if_max.float()) * out_poly
+
+        out = self.relu1(out, mask)
 
         if self.if_forward_with_fms:
             fms.append(out)
+
+        out = self.avgpool1(out)
+        # out = self.maxpool(out)
 
         for layer in [self.layer1_0, self.layer1_1, self.layer2_0, self.layer2_1, self.layer3_0, self.layer3_1, self.layer4_0, self.layer4_1]:
             if self.if_forward_with_fms:
@@ -199,8 +204,9 @@ class ResNetPoly(nn.Module):
             return out
 
     def get_relu_density(self, mask):
-        total_elements = self.rand_maxpool_mask.numel()
-        maxpool_elements = (mask > self.rand_maxpool_mask).sum().item()
+        # total_elements = self.rand_maxpool_mask.numel()
+        # maxpool_elements = (mask > self.rand_maxpool_mask).sum().item()
+        total_elements, relu_elements = self.relu1.get_relu_density(mask)
         
         total1_0, relu1_0 = self.layer1_0.get_relu_density(mask)
         total1_1, relu1_1 = self.layer1_1.get_relu_density(mask)
@@ -212,7 +218,7 @@ class ResNetPoly(nn.Module):
         total4_1, relu4_1 = self.layer4_1.get_relu_density(mask)
         
         total_sum = total_elements + total1_0 + total1_1 + total2_0 + total2_1 + total3_0 + total3_1 + total4_0 + total4_1
-        relu_sum = maxpool_elements + relu1_0 + relu1_1 + relu2_0 + relu2_1 + relu3_0 + relu3_1 + relu4_0 + relu4_1
+        relu_sum = relu_elements + relu1_0 + relu1_1 + relu2_0 + relu2_1 + relu3_0 + relu3_1 + relu4_0 + relu4_1
 
         return total_sum, relu_sum
         

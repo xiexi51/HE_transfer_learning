@@ -95,7 +95,7 @@ def process(pn, args):
     def find_latest_epoch(resume_dir):
         max_epoch = -1
         for filename in os.listdir(resume_dir):
-            match = re.match(r'model_epoch_(\d+)\.pth', filename)
+            match = re.match(r'checkpoint_epoch_(\d+)\.pth', filename)
             if match:
                 epoch = int(match.group(1))
                 if epoch > max_epoch:
@@ -201,7 +201,7 @@ def process(pn, args):
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         if lr_scheduler is not None:
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler_state_dict'])
-        assert checkpoint['epoch'] == start_epoch
+        assert checkpoint['epoch'] + 1 == start_epoch
 
         log_root = args.resume_dir
     else:

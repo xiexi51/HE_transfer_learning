@@ -163,8 +163,9 @@ class ResNetRelu(nn.Module):
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu1(out)
-        out = self.maxpool1(out)
         fms.append(out)
+        
+        out = self.maxpool1(out)
 
         out, _fms = self.layer1_0.forward_with_fms(out)
         fms += _fms
