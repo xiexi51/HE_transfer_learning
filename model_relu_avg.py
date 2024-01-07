@@ -61,7 +61,7 @@ class BasicBlockRelu(nn.Module):
 
 
 class ResNetReluAvg(nn.Module):
-    def __init__(self, block, num_blocks, num_classes=10):
+    def __init__(self, block, num_blocks, num_classes=10, first_relu = True):
         super(ResNetReluAvg, self).__init__()
         self.in_planes = 64
 
@@ -77,7 +77,9 @@ class ResNetReluAvg(nn.Module):
 
         self.linear = nn.Linear(512*block.expansion, num_classes)
 
-        self.relu1 = nn.ReLU()
+        self.first_relu = first_relu
+        if self.first_relu:
+            self.relu1 = nn.ReLU()
 
         self.if_forward_with_fms = True
 
@@ -100,7 +102,8 @@ class ResNetReluAvg(nn.Module):
 
         out = self.conv1(x)
         out = self.bn1(out)
-        out = self.relu1(out)
+        if self.first_relu:
+            out = self.relu1(out)
         out = self.avgpool1(out)
         out = self.layer1_0(out)
         out = self.layer1_1(out)
@@ -120,10 +123,13 @@ class ResNetReluAvg(nn.Module):
         fms = []
         out = self.conv1(x)
         out = self.bn1(out)
-        out = self.relu1(out)
-        fms.append(out)
+
+        if self.first_relu:
+            out = self.relu1(out)
         
         out = self.avgpool1(out)    
+
+        fms.append(out)
 
         out, _fms = self.layer1_0.forward_with_fms(out)
         fms += _fms
@@ -151,62 +157,6 @@ class ResNetReluAvg(nn.Module):
 
         return out, fms
     
-    def forward_with_fms_and_pre(self, x):
-        fms_pre = []
-        fms = []
-        
-        out = self.conv1(x)
-        out = self.bn1(out)
-        
-        fms_pre.append(out.detach())
-        out = self.relu1(out)
-        fms.append(out.detach())
-        
-        out = self.maxpool1(out)
-        
-        out, _fms_pre, _fms = self.layer1_0.forward_with_fms_and_pre(out)
-        fms_pre += _fms_pre
-        fms += _fms
-        
-        
-        out, _fms_pre, _fms = self.layer1_1.forward_with_fms_and_pre(out)
-        fms_pre += _fms_pre
-        fms += _fms
-        
-        fms_pre += _fms_pre
-        out, _fms_pre, _fms = self.layer2_0.forward_with_fms_and_pre(out)
-        fms += _fms
-        
-        
-        out, _fms_pre, _fms = self.layer2_1.forward_with_fms_and_pre(out)
-        fms_pre += _fms_pre
-        fms += _fms
 
-        
-        out, _fms_pre, _fms = self.layer3_0.forward_with_fms_and_pre(out)
-        fms_pre += _fms_pre
-        fms += _fms
-        
-        
-        out, _fms_pre, _fms = self.layer3_1.forward_with_fms_and_pre(out)
-        fms_pre += _fms_pre
-        fms += _fms
-
-        
-        out, _fms_pre, _fms = self.layer4_0.forward_with_fms_and_pre(out)
-        fms_pre += _fms_pre
-        fms += _fms
-        
-        
-        out, _fms_pre, _fms = self.layer4_1.forward_with_fms_and_pre(out)
-        fms_pre += _fms_pre
-        fms += _fms
-
-        out = F.adaptive_avg_pool2d(out, (1,1))
-        out = out.view(out.size(0), -1)
-        out = self.linear(out)
-
-        return out, fms_pre, fms
-
-def ResNet18ReluAvg():
-    return ResNetReluAvg(BasicBlockRelu, [2, 2, 2, 2], 1000)
+def ResNet18ReluAvg(first_relu):
+    return ResNetReluAvg(BasicBlockRelu, [2, 2, 2, 2], 1000, first_relu)

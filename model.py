@@ -113,21 +113,23 @@ class ResNetPoly(nn.Module):
         self.if_channel = if_channel
         self.if_pixel = if_pixel
         self.poly_weight_inits = poly_weight_inits
-        self.poly_factors = poly_factors
+        # self.poly_factors = poly_factors
         self.relu2_extra_factor = relu2_extra_factor
 
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
 
         # self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.avgpool1 = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
-        # self.replace_conv = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, groups=64, bias=False)
-        # nn.init.constant_(self.replace_conv.weight, 1.0 / 7.0)
+        # self.avgpool1 = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
+        self.replace_conv = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, groups=64, bias=False)
+        nn.init.constant_(self.replace_conv.weight, 1.0 / 9.0)
 
-        self.layer1_0, self.layer1_1 = self._create_blocks(block, 64, num_blocks[0], stride=1)
-        self.layer2_0, self.layer2_1 = self._create_blocks(block, 128, num_blocks[1], stride=2)
-        self.layer3_0, self.layer3_1 = self._create_blocks(block, 256, num_blocks[2], stride=2)
-        self.layer4_0, self.layer4_1 = self._create_blocks(block, 512, num_blocks[3], stride=2)
+        reduced_poly_factors = [0.0, 1, 0.1]
+
+        self.layer1_0, self.layer1_1 = self._create_blocks(block, 64, num_blocks[0], stride=1, poly_factors=poly_factors)
+        self.layer2_0, self.layer2_1 = self._create_blocks(block, 128, num_blocks[1], stride=2, poly_factors=poly_factors)
+        self.layer3_0, self.layer3_1 = self._create_blocks(block, 256, num_blocks[2], stride=2, poly_factors=poly_factors)
+        self.layer4_0, self.layer4_1 = self._create_blocks(block, 512, num_blocks[3], stride=2, poly_factors=poly_factors)
 
         self.linear = nn.Linear(512*block.expansion, num_classes)
 
@@ -137,14 +139,14 @@ class ResNetPoly(nn.Module):
 
         self.if_forward_with_fms = False
 
-    def _create_blocks(self, block, planes, num_blocks, stride):
+    def _create_blocks(self, block, planes, num_blocks, stride, poly_factors):
         strides = [stride] + [1]*(num_blocks-1)
         blocks = []
         for stride in strides:
             if planes == 512 and stride == 1:
-                blocks.append(block(self.in_planes, planes, stride, self.if_channel, self.if_pixel, self.poly_weight_inits, self.poly_factors, self.relu2_extra_factor))
+                blocks.append(block(self.in_planes, planes, stride, self.if_channel, self.if_pixel, self.poly_weight_inits, poly_factors, self.relu2_extra_factor))
             else:
-                blocks.append(block(self.in_planes, planes, stride, self.if_channel, self.if_pixel, self.poly_weight_inits, self.poly_factors))
+                blocks.append(block(self.in_planes, planes, stride, self.if_channel, self.if_pixel, self.poly_weight_inits, poly_factors))
 
             self.in_planes = planes * block.expansion
         return blocks
@@ -179,12 +181,14 @@ class ResNetPoly(nn.Module):
         # if_max = mask > self.rand_maxpool_mask
         # out = if_max.float() * out_origin + (1 - if_max.float()) * out_poly
 
+        # out = self.avgpool1(out)
+        out = self.replace_conv(out)
+
         out = self.relu1(out, mask)
 
         if self.if_forward_with_fms:
             fms.append(out)
-
-        out = self.avgpool1(out)
+        
         # out = self.maxpool(out)
 
         for layer in [self.layer1_0, self.layer1_1, self.layer2_0, self.layer2_1, self.layer3_0, self.layer3_1, self.layer4_0, self.layer4_1]:

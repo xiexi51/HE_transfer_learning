@@ -88,7 +88,7 @@ def process(pn, args):
     testloader = torch.utils.data.DataLoader(testset, sampler=test_sampler, batch_size=args.batch_size_test, num_workers=5, pin_memory=True, shuffle=False)
     # testloader = torch.utils.data.DataLoader(testset, batch_size = args.batch_size_test, shuffle=False, num_workers=args.num_workers, pin_memory=True)
 
-    model = ResNet18ReluAvg()
+    model = ResNet18ReluAvg(first_relu=False)
 
     checkpoint = None
 
@@ -289,7 +289,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Fully poly replacement for ResNet on ImageNet')
     parser.add_argument('--id', default=0, type=int)
-    parser.add_argument('--total_epochs', default=100, type=int)
+    parser.add_argument('--total_epochs', default=180, type=int)
     parser.add_argument('--lr', default=0.4, type=float, help='learning rate')
     parser.add_argument('--w_decay', default=1e-4, type=float, help='w decay rate')
     parser.add_argument('--optim', type=str, default='sgd', choices = ['sgd', 'adamw'])
