@@ -13,6 +13,8 @@ def ddp_train(args, trainloader, model_s, model_t, optimizer, epoch, mask, write
         model_t.eval()
     # model_t.train()
 
+    # model_s.module.bn1.eval()
+
     train_loss = 0
     train_loss_kd = 0
     train_loss_ce = 0

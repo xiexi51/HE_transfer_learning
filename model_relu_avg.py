@@ -126,10 +126,11 @@ class ResNetReluAvg(nn.Module):
 
         if self.first_relu:
             out = self.relu1(out)
+
+        fms.append(out)
         
         out = self.avgpool1(out)    
 
-        fms.append(out)
 
         out, _fms = self.layer1_0.forward_with_fms(out)
         fms += _fms

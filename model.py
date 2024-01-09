@@ -120,9 +120,9 @@ class ResNetPoly(nn.Module):
         self.bn1 = nn.BatchNorm2d(64)
 
         # self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        # self.avgpool1 = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
-        self.replace_conv = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, groups=64, bias=False)
-        nn.init.constant_(self.replace_conv.weight, 1.0 / 9.0)
+        self.avgpool1 = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
+        # self.replace_conv = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, groups=64, bias=False)
+        # nn.init.constant_(self.replace_conv.weight, 1.0 / 9.0)
 
         reduced_poly_factors = [0.0, 1, 0.1]
 
@@ -181,13 +181,17 @@ class ResNetPoly(nn.Module):
         # if_max = mask > self.rand_maxpool_mask
         # out = if_max.float() * out_origin + (1 - if_max.float()) * out_poly
 
-        # out = self.avgpool1(out)
-        out = self.replace_conv(out)
+        
+        # out = self.replace_conv(out)
 
         out = self.relu1(out, mask)
 
         if self.if_forward_with_fms:
             fms.append(out)
+
+        out = self.avgpool1(out)
+
+        
         
         # out = self.maxpool(out)
 
@@ -210,7 +214,7 @@ class ResNetPoly(nn.Module):
     def get_relu_density(self, mask):
         # total_elements = self.rand_maxpool_mask.numel()
         # maxpool_elements = (mask > self.rand_maxpool_mask).sum().item()
-        total_elements, relu_elements = self.relu1.get_relu_density(mask)
+        # total_elements, relu_elements = self.relu1.get_relu_density(mask)
         
         total1_0, relu1_0 = self.layer1_0.get_relu_density(mask)
         total1_1, relu1_1 = self.layer1_1.get_relu_density(mask)
@@ -221,8 +225,8 @@ class ResNetPoly(nn.Module):
         total4_0, relu4_0 = self.layer4_0.get_relu_density(mask)
         total4_1, relu4_1 = self.layer4_1.get_relu_density(mask)
         
-        total_sum = total_elements + total1_0 + total1_1 + total2_0 + total2_1 + total3_0 + total3_1 + total4_0 + total4_1
-        relu_sum = relu_elements + relu1_0 + relu1_1 + relu2_0 + relu2_1 + relu3_0 + relu3_1 + relu4_0 + relu4_1
+        total_sum = total1_0 + total1_1 + total2_0 + total2_1 + total3_0 + total3_1 + total4_0 + total4_1
+        relu_sum = relu1_0 + relu1_1 + relu2_0 + relu2_1 + relu3_0 + relu3_1 + relu4_0 + relu4_1
 
         return total_sum, relu_sum
         
