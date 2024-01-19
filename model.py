@@ -171,17 +171,6 @@ class ResNetPoly(nn.Module):
         out = self.conv1(x)
         out = self.bn1(out)
         
-        # out_origin = self.maxpool(F.relu(out))
-
-        # out_poly = self.relu1(self.replace_conv(out), None)
-
-        # if self.rand_maxpool_mask is None:
-        #     self.rand_maxpool_mask = nn.Parameter(torch.rand(out_origin.shape[1:], device=out_origin.device), requires_grad=False)
-        #     print(f"init rand_maxpool_mask, shape {self.rand_maxpool_mask.shape}, first element {self.rand_maxpool_mask.view(-1)[0].item()}")
-        # if_max = mask > self.rand_maxpool_mask
-        # out = if_max.float() * out_origin + (1 - if_max.float()) * out_poly
-
-        
         # out = self.replace_conv(out)
 
         out = self.relu1(out, mask)
@@ -190,9 +179,6 @@ class ResNetPoly(nn.Module):
             fms.append(out)
 
         out = self.avgpool1(out)
-
-        
-        
         # out = self.maxpool(out)
 
         for layer in [self.layer1_0, self.layer1_1, self.layer2_0, self.layer2_1, self.layer3_0, self.layer3_1, self.layer4_0, self.layer4_1]:

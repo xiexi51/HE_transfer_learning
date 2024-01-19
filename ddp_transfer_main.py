@@ -3,22 +3,22 @@ import torch
 import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
-from torchvision.models import resnet18, ResNet18_Weights
 import argparse
 from torch.utils.tensorboard import SummaryWriter
 import ast
-from model import ResNet18Poly, general_relu_poly, convert_to_bf16_except_bn, find_submodule, copy_parameters
-from model_relu_avg import ResNet18ReluAvg
-from model_relu import ResNet18Relu
+from model import ResNet18Poly
+
 import numpy as np
 import re
-from ddp_training import ddp_train, ddp_test, single_test
+from ddp_training import ddp_train_transfer, ddp_test, single_test
 from utils import Lookahead, MaskProvider
 from datetime import datetime
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data.distributed import DistributedSampler
 import torch.multiprocessing as mp
 import torch.distributed as dist
+import torch.nn as nn
+from locals import imagenet_root, proj_root, data_root
 
 def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
     lr = init_lr * (lr_gamma ** (epoch // lr_step_size))
@@ -50,125 +50,113 @@ def process(pn, args):
     if args.data_augment:
         transform_train = transforms.Compose([
             transforms.RandomResizedCrop(224, antialias=True),
+            # transforms.Resize(224),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
             ])
     else:
         transform_train = transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
+            # transforms.Resize(256),
+            # transforms.CenterCrop(224),
+            transforms.Resize(224),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
             ])
 
     transform_test = transforms.Compose([
-        transforms.Resize(256, antialias=True),
-        transforms.CenterCrop(224),
+        # transforms.Resize(256, antialias=True),
+        # transforms.CenterCrop(224),
+        transforms.Resize(224),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
     
     if args.train_subset:
-        trainset = torchvision.datasets.ImageFolder(root='/home/uconn/xiexi/poly_replace/subset2' , transform=transform_train)
-    else:
-        trainset = torchvision.datasets.ImageFolder(root='/home/xix22010/data/imagenet-1k/data/train' , transform=transform_train)
+        raise KeyError("no need to use subset here")
     
+    if pn == 0:
+        _ = torchvision.datasets.CIFAR10(root=data_root, train=True, download=True, transform=transform_train)
+        _ = torchvision.datasets.CIFAR10(root=data_root, train=False, download=True, transform=transform_test)
 
+    dist.barrier()
+
+    trainset = torchvision.datasets.CIFAR10(root=data_root, train=True, download=False, transform=transform_train)
     train_sampler = DistributedSampler(trainset, num_replicas=args.total_gpus, rank=pn)
     trainloader = torch.utils.data.DataLoader(trainset, sampler=train_sampler, batch_size=args.batch_size_train, num_workers=args.num_train_loader_workers, pin_memory=True, shuffle=False)
-
     
-    testset = torchvision.datasets.ImageFolder(
-        root='/home/xix22010/data/imagenet-1k/data/val', transform=transform_test)
-    
+    testset = torchvision.datasets.CIFAR10(root=data_root, train=False, download=False, transform=transform_test)
     test_sampler = DistributedSampler(testset, num_replicas=args.total_gpus, rank=pn)
     testloader = torch.utils.data.DataLoader(testset, sampler=test_sampler, batch_size=args.batch_size_test, num_workers=args.num_test_loader_workers, pin_memory=True, shuffle=False)
-    testloader_single = torch.utils.data.DataLoader(testset, batch_size = args.batch_size_test, shuffle=False, num_workers=args.num_test_loader_workers, pin_memory=True)
+    # testloader_single = torch.utils.data.DataLoader(testset, batch_size = args.batch_size_test, shuffle=False, num_workers=args.num_test_loader_workers, pin_memory=True)
 
-    model = ResNet18Poly(args.channel_wise, args.pixel_wise, args.poly_weight_inits, args.poly_weight_factors, relu2_extra_factor=1)
+    base_model = ResNet18Poly(args.channel_wise, args.pixel_wise, args.poly_weight_inits, args.poly_weight_factors, relu2_extra_factor=1)
 
     dummy_input = torch.rand(1, 3, 224, 224) 
-    model((dummy_input, 0))
+    base_model((dummy_input, 0))
 
-    # pretrain_model = torchvision.models.resnet18(weights=ResNet18_Weights.DEFAULT)
+    checkpoint_base_model = torch.load('resnet18_avg_poly_675.pth')
+    base_model.load_state_dict(checkpoint_base_model['model_state_dict'], strict=True)
 
-    first_relu = True
+    # layers_to_freeze = [base_model.conv1, base_model.bn1, base_model.relu1, base_model.avgpool1,
+    #                 base_model.layer1_0, base_model.layer1_1, base_model.layer2_0, base_model.layer2_1, 
+    #                 base_model.layer3_0, base_model.layer3_1, base_model.layer4_0, base_model.layer4_1]
+    
+    layers_to_freeze = [base_model.conv1, base_model.bn1, base_model.relu1, base_model.avgpool1,
+                    base_model.layer1_0, base_model.layer1_1, base_model.layer2_0, base_model.layer2_1, 
+                    base_model.layer3_0, base_model.layer3_1, base_model.layer4_0]
+    
+    for layer in layers_to_freeze:
+        for param in layer.parameters():
+            param.requires_grad = False
 
-    model_relu_avg = ResNet18ReluAvg(first_relu)
-    if first_relu:
-        checkpoint_relu_avg = torch.load("/home/xix22010/py_projects/HE_transfer_learning/runs20240101163300/checkpoint_epoch_79.pth")
-    else:
-        checkpoint_relu_avg = torch.load("/home/uconn/xiexi/HE_transfer_learning/runs20240106041311/checkpoint_epoch_141.pth")
-    model_relu_avg.load_state_dict(checkpoint_relu_avg['model_state_dict'], strict=True)
-    model_relu_avg = model_relu_avg.cuda()
+    # checkpoint = None
 
-    # model_relu = ResNet18Relu()
-    # copy_parameters(pretrain_model, model_relu)
-    # model_relu = model_relu.cuda()
+    # def find_latest_epoch(resume_dir):
+    #     max_epoch = -1
+    #     for filename in os.listdir(resume_dir):
+    #         match = re.match(r'checkpoint_epoch_(\d+)\.pth', filename)
+    #         if match:
+    #             epoch = int(match.group(1))
+    #             if epoch > max_epoch:
+    #                 max_epoch = epoch
+    #     return max_epoch
 
-    # model_relu_avg = model_relu
+    # if args.resume or args.reload:
+    #     if args.resume:
+    #         if args.resume_epoch is None:
+    #             start_epoch = find_latest_epoch(args.resume_dir) + 1
+    #         else:
+    #             start_epoch = args.resume_epoch + 1
+    #         checkpoint_path = os.path.join(args.resume_dir, f'checkpoint_epoch_{start_epoch - 1}.pth')
+    #     else:
+    #         checkpoint_path = os.path.join(args.resume_dir, f'checkpoint_epoch_{args.resume_epoch}.pth')
 
-    checkpoint = None
+    #     if checkpoint_path and os.path.exists(checkpoint_path):
+    #         print(f"Loading checkpoint: {checkpoint_path}")
+    #         checkpoint = torch.load(checkpoint_path)
+    #         model.load_state_dict(checkpoint['model_state_dict'], strict=True)
+    #     else:
+    #         print(f"No checkpoint found at {checkpoint_path}")
+    # else:
+    #     model.load_state_dict(checkpoint_relu_avg['model_state_dict'], strict=False)
+    #     # copy_parameters(pretrain_model, model) 
+    #     # model.load_state_dict(torch.load("default_poly_model.pth"))
+    #     # initialize_resnet(model)
 
-    def find_latest_epoch(resume_dir):
-        max_epoch = -1
-        for filename in os.listdir(resume_dir):
-            match = re.match(r'checkpoint_epoch_(\d+)\.pth', filename)
-            if match:
-                epoch = int(match.group(1))
-                if epoch > max_epoch:
-                    max_epoch = epoch
-        return max_epoch
-
-    if args.resume or args.reload:
-        if args.resume:
-            if args.resume_epoch is None:
-                start_epoch = find_latest_epoch(args.resume_dir) + 1
-            else:
-                start_epoch = args.resume_epoch + 1
-            checkpoint_path = os.path.join(args.resume_dir, f'checkpoint_epoch_{start_epoch - 1}.pth')
-        else:
-            checkpoint_path = os.path.join(args.resume_dir, f'checkpoint_epoch_{args.resume_epoch}.pth')
-
-        if checkpoint_path and os.path.exists(checkpoint_path):
-            print(f"Loading checkpoint: {checkpoint_path}")
-            checkpoint = torch.load(checkpoint_path)
-            model.load_state_dict(checkpoint['model_state_dict'], strict=True)
-        else:
-            print(f"No checkpoint found at {checkpoint_path}")
-    else:
-        model.load_state_dict(checkpoint_relu_avg['model_state_dict'], strict=False)
-        # copy_parameters(pretrain_model, model) 
-        # model.load_state_dict(torch.load("default_poly_model.pth"))
-        # initialize_resnet(model)
-
-
-    model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+    # model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
     # tmp_test_acc = 0
     # if pn == 0:
     #     single_test(args, testloader_single, model.cuda(), 0, tmp_test_acc, 1)
     # dist.barrier()
+            
+    base_model.linear = nn.Linear(512, 10)
     
-    model = model.cuda()
+    model = base_model.cuda()
     model.eval()
-
-    for param in model_relu_avg.parameters():
-        param.requires_grad = False
-
-    if not first_relu:
-        for param in model.conv1.parameters():
-            param.requires_grad = False
-        
-        for param in model.bn1.parameters():
-            param.requires_grad = False
     
     model = DistributedDataParallel(model, device_ids=[pn])
-
-    # if args.bf16:
-    #     model = convert_to_bf16_except_bn(model)
-    #     model_relu = convert_to_bf16_except_bn(model_relu)
 
     if args.optim == 'adamw':
         optimizer = optim.AdamW(model.parameters(), lr = args.lr, weight_decay=args.w_decay)
@@ -192,13 +180,14 @@ def process(pn, args):
         log_root = args.log_root
     else:
         log_root = 'runs' + current_datetime
-    if args.resume and args.resume_dir:
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        if lr_scheduler is not None:
-            lr_scheduler.load_state_dict(checkpoint['lr_scheduler_state_dict'])
-        assert checkpoint['epoch'] + 1 == start_epoch
-        if args.resume_log_root:
-            log_root = args.resume_dir    
+    
+    # if args.resume and args.resume_dir:
+    #     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    #     if lr_scheduler is not None:
+    #         lr_scheduler.load_state_dict(checkpoint['lr_scheduler_state_dict'])
+    #     assert checkpoint['epoch'] + 1 == start_epoch
+    #     if args.resume_log_root:
+    #         log_root = args.resume_dir    
 
     log_dir = log_root
     
@@ -251,30 +240,29 @@ def process(pn, args):
                     total_elements, relu_elements = model.get_relu_density(mask)
                 print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
         
-        omit_fms = 0
-        train_acc = ddp_train(args, trainloader, model, model_relu_avg, optimizer, epoch, mask, writer, pn, omit_fms)
+        train_acc = ddp_train_transfer(args, trainloader, model, optimizer, epoch, mask, writer, pn)
 
-        if mask < 0.01 or False:
+        if mask < 0.01 or True:
             test_acc, best_acc = ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn)
 
         if lr_scheduler is not None:
             lr_scheduler.step()
         
         if pn == 0:
-            if isinstance(model, torch.nn.parallel.DistributedDataParallel):
-                model_state_dict = model.module.state_dict()
-            else:
-                model_state_dict = model.state_dict()
-            if lr_scheduler is None:
-                lr_scheduler_state_dict = None
-            else:
-                lr_scheduler_state_dict = lr_scheduler.state_dict()
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model_state_dict,
-                'optimizer_state_dict': optimizer.state_dict(),
-                'lr_scheduler_state_dict': lr_scheduler_state_dict,
-            }, f"{log_dir}/checkpoint_epoch_{epoch}.pth")
+            # if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+            #     model_state_dict = model.module.state_dict()
+            # else:
+            #     model_state_dict = model.state_dict()
+            # if lr_scheduler is None:
+            #     lr_scheduler_state_dict = None
+            # else:
+            #     lr_scheduler_state_dict = lr_scheduler.state_dict()
+            # torch.save({
+            #     'epoch': epoch,
+            #     'model_state_dict': model_state_dict,
+            #     'optimizer_state_dict': optimizer.state_dict(),
+            #     'lr_scheduler_state_dict': lr_scheduler_state_dict,
+            # }, f"{log_dir}/checkpoint_epoch_{epoch}.pth")
             with open(f"{log_dir}/acc.txt", 'a') as file:
                 file.write(f'{epoch} train {train_acc*100:.2f} test {test_acc*100:.2f} best {best_acc*100:.2f}\n')
 
@@ -289,12 +277,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Fully poly replacement on ResNet for ImageNet')
     parser.add_argument('--id', default=0, type=int)
     parser.add_argument('--total_epochs', default=300, type=int)
-    parser.add_argument('--lr', default=0.0003, type=float, help='learning rate')
+    parser.add_argument('--lr', default=0.001, type=float, help='learning rate')
     parser.add_argument('--momentum', default=0.9, type=float)
     parser.add_argument('--w_decay', default=1e-4, type=float, help='w decay rate')
     parser.add_argument('--optim', type=str, default='adamw', choices = ['sgd', 'adamw'])
     parser.add_argument('--batch_size_train', type=int, default=200, help='Batch size for training')
-    parser.add_argument('--batch_size_test', type=int, default=500, help='Batch size for testing')
+    parser.add_argument('--batch_size_test', type=int, default=200, help='Batch size for testing')
     parser.add_argument('--data_augment', type=ast.literal_eval, default=True)
     parser.add_argument('--train_subset', type=ast.literal_eval, default=False, help='if train on the 1/13 subset of ImageNet or the full ImageNet')
     parser.add_argument('--pixel_wise', type=ast.literal_eval, default=True, help='if use pixel-wise poly replacement')
@@ -307,15 +295,15 @@ if __name__ == "__main__":
     parser.add_argument('--loss_fm_factor', default=100, type=float, help='the factor of the feature map loss, set to 0 to disable')
     parser.add_argument('--loss_ce_factor', default=1, type=float, help='the factor of the cross-entropy loss, set to 0 to disable')
     parser.add_argument('--loss_kd_factor', default=0.1, type=float, help='the factor of the knowledge distillation loss, set to 0 to disable')
-    parser.add_argument('--lookahead', type=ast.literal_eval, default=True, help='if enable look ahead for the optimizer')
+    parser.add_argument('--lookahead', type=ast.literal_eval, default=False, help='if enable look ahead for the optimizer')
     parser.add_argument('--lr_anneal', type=str, default='None', choices = ['None', 'cos'])
-    parser.add_argument('--lr_step_size', type=int, default=100, help="decrease lr every step-size epochs")
-    parser.add_argument('--lr_gamma', type=float, default=0.3, help="decrease lr by a factor of lr-gamma")
+    parser.add_argument('--lr_step_size', type=int, default=50, help="decrease lr every step-size epochs")
+    parser.add_argument('--lr_gamma', type=float, default=0.2, help="decrease lr by a factor of lr-gamma")
 
     parser.add_argument('--bf16', type=ast.literal_eval, default=False, help='if enable training with bf16 precision')
     parser.add_argument('--fp16', type=ast.literal_eval, default=False, help='if enable training with float16 precision')
     
-    parser.add_argument('--num_train_loader_workers', type=int, default=6)
+    parser.add_argument('--num_train_loader_workers', type=int, default=7)
     parser.add_argument('--num_test_loader_workers', type=int, default=5)
     parser.add_argument('--pbar', type=ast.literal_eval, default=True)
     parser.add_argument('--log_root', type=str)

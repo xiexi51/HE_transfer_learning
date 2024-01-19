@@ -249,3 +249,75 @@ def single_test(args, testloader, model, epoch, best_acc, mask):
         best_acc = test_acc
 
     return test_acc, best_acc
+
+
+def ddp_train_transfer(args, trainloader, model_s, optimizer, epoch, mask, writer, pn):
+    model_s.eval()
+
+    train_loss = 0
+
+    if args.pbar and pn == 0:
+        pbar = tqdm(trainloader, total=len(trainloader), desc=f"Epo {epoch} Lr {optimizer.param_groups[0]['lr']:.1e}", ncols=125)
+    else:
+        pbar = trainloader
+
+    top1_total = 0
+    top5_total = 0
+    total = 0
+
+    reduced_total = 0
+    reduced_top1_total = 0
+    reduced_top5_total = 0
+    
+    criterion_ce = nn.CrossEntropyLoss()
+
+    for x, y in pbar:
+        # print(pn, x[0,0,0,0].numpy())
+        # break
+        x, y = x.cuda(), y.cuda()
+        # x = torch.load(f'x{pn}.pt').cuda()
+        # y = torch.load(f'y{pn}.pt').cuda()
+
+        optimizer.zero_grad()
+        
+        if isinstance(model_s, DistributedDataParallel):
+            model_s.module.if_forward_with_fms = False
+        else:
+            model_s.if_forward_with_fms = False
+        
+        out_s = model_s((x, 0))
+
+        loss = criterion_ce(out_s, y)
+
+        train_loss += loss.item()
+        
+        loss.backward()
+        
+        optimizer.step()
+
+        top1, top5 = accuracy(out_s, y, topk=(1, 5))
+        top1_total += top1[0] * x.size(0)
+        top5_total += top5[0] * x.size(0)
+        total += x.size(0)
+
+        reduced_total = torch.tensor(total, dtype=torch.float).cuda().detach()
+        reduced_top1_total = torch.tensor(top1_total, dtype=torch.float).cuda().detach()
+        reduced_top5_total = torch.tensor(top5_total, dtype=torch.float).cuda().detach()
+        dist.reduce(reduced_total, dst=0)
+        dist.reduce(reduced_top1_total, dst=0)
+        dist.reduce(reduced_top5_total, dst=0)
+
+        reduced_total = reduced_total.cpu().numpy()
+        reduced_top1_total = reduced_top1_total.cpu().numpy()
+        reduced_top5_total = reduced_top5_total.cpu().numpy()
+        
+        if args.pbar and pn == 0:
+            pbar.set_postfix_str(f"L{train_loss/total:.2e}, ce{train_loss/total:.2e}, 1a {100*reduced_top1_total/reduced_total:.1f}, 5a {100*reduced_top5_total/reduced_total:.1f}")
+
+    train_acc = (reduced_top1_total / reduced_total).item()
+
+    if writer is not None:
+        writer.add_scalar('Accuracy/train', train_acc, epoch)
+        writer.add_scalar('Loss/train', train_loss/total, epoch)
+        
+    return train_acc
