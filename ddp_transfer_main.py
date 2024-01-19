@@ -65,9 +65,9 @@ def process(pn, args):
             ])
 
     transform_test = transforms.Compose([
-        # transforms.Resize(256, antialias=True),
-        # transforms.CenterCrop(224),
-        transforms.Resize(224),
+        transforms.Resize(256, antialias=True),
+        transforms.CenterCrop(224),
+        # transforms.Resize(224),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
@@ -104,7 +104,7 @@ def process(pn, args):
     
     layers_to_freeze = [base_model.conv1, base_model.bn1, base_model.relu1, base_model.avgpool1,
                     base_model.layer1_0, base_model.layer1_1, base_model.layer2_0, base_model.layer2_1, 
-                    base_model.layer3_0, base_model.layer3_1, base_model.layer4_0]
+                    base_model.layer3_0, base_model.layer3_1, base_model.layer4_0, base_model.layer4_1.conv1, base_model.layer4_1.bn1, base_model.layer4_1.relu1]
     
     for layer in layers_to_freeze:
         for param in layer.parameters():

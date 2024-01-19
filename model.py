@@ -83,8 +83,11 @@ class BasicBlockPoly(nn.Module):
         self.relu2 = general_relu_poly(if_channel, if_pixel, weight_inits, relu2_factors, planes)
 
     def forward(self, x, mask):
-        out = self.relu1(self.bn1(self.conv1(x)), mask)
-        out = self.bn2(self.conv2(out))
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu1(out, mask)
+        out = self.conv2(out)
+        out = self.bn2(out)
         out += self.shortcut(x)
         out = self.relu2(out, mask)
         return out
