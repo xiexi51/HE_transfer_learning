@@ -25,7 +25,6 @@ from vanillanet import vanillanet_6
 import timm
 from timm.utils import ModelEma
 from optim_factory import create_optimizer
-from utils_vanilla import NativeScalerWithGradNormCount as NativeScaler
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy, BinaryCrossEntropy
 import math
 
@@ -148,8 +147,6 @@ def process(pn, args):
 
     assert not(lr_scheduler is not None and args.lr_step_size > 0), "should not use both lr_anneal and lr_step"
 
-    loss_scaler = NativeScaler()
-
     # scaler = torch.cuda.amp.GradScaler(enabled=args.bf16 or args.fp16)
 
     if mixup_fn is not None:
@@ -243,8 +240,9 @@ def process(pn, args):
                 print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
         
         omit_fms = 0
-        train_acc = ddp_vanilla_train(args, trainloader, model, None, optimizer, epoch, mask, writer, pn, omit_fms, 
-                                      mixup_fn, criterion_ce, loss_scaler, None, 1, model_ema)
+        train_acc = ddp_vanilla_train(args=args, trainloader=trainloader, model_s=model, model_t=None, optimizer=optimizer, epoch=epoch, 
+                                      mask=mask, writer=writer, pn=pn, omit_fms=omit_fms, mixup_fn=mixup_fn, criterion_ce=criterion_ce, 
+                                      max_norm=None, update_freq=args.update_freq, model_ema=model_ema)
 
         if mask < 0.01 and False:
             test_acc, best_acc = ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn)
@@ -290,6 +288,8 @@ if __name__ == "__main__":
     parser.add_argument('--log_root', type=str)
 
     parser.add_argument('--switch_to_deploy', default=None, type=str)
+
+    parser.add_argument('--update_freq', default=1, type=int, help='gradient accumulation steps')
 
     
     # imagenet dataset arguments

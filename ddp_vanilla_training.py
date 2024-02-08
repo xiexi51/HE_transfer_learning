@@ -10,20 +10,16 @@ from argparse import Namespace
 from typing import Iterable, Optional, List
 from torch.utils.tensorboard import SummaryWriter
 from timm.data import Mixup
-from utils_vanilla import NativeScalerWithGradNormCount as NativeScaler
 from timm.utils import ModelEma
 
 
 # def ddp_train(args, trainloader, model_s, model_t, optimizer, epoch, mask, writer, pn, omit_fms, mixup_fn, criterion_ce, loss_scaler):
 def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Module, model_t: torch.nn.Module, optimizer: torch.optim.Optimizer, 
               epoch: int, mask: float, writer: SummaryWriter, pn: int, omit_fms: int, mixup_fn: Mixup, criterion_ce: torch.nn.Module, 
-              loss_scaler: NativeScaler, max_norm: float, update_freq: int, model_ema: List[ModelEma]):
+              max_norm: float, update_freq: int, model_ema: List[ModelEma]):
     model_s.train()
     if model_t is not None:
         model_t.eval()
-    
-    
-    
 
     train_loss = 0
     train_loss_kd = 0
@@ -50,13 +46,20 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
     else:
         loss_fm_fun = at_loss
     
-
-
     criterion_kd = SoftTarget(4.0).cuda()
+
+    total_batches = len(pbar)
+    effective_batches = total_batches - total_batches % update_freq
+    accumulated_batches = 0
+
+    scaler = torch.cuda.amp.GradScaler(enabled=args.use_amp)
 
     optimizer.zero_grad()
 
-    for x, y in pbar:
+    for iter, (x, y) in enumerate(pbar):
+        if iter >= effective_batches:
+            break
+
         # print(pn, x[0,0,0,0].numpy())
         # break
         x, y = x.cuda(), y.cuda()
@@ -103,46 +106,26 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                 loss += loss_ce
                 train_loss_ce += loss_ce.item()
 
+        loss /= update_freq
+        assert math.isfinite(loss)
+        scaler.scale(loss).backward(create_graph=hasattr(optimizer, 'is_second_order') and optimizer.is_second_order)
+        accumulated_batches += 1
         train_loss += loss.item()
 
-        if not math.isfinite(train_loss): # this could trigger if using AMP
-            print("Loss is {}, stopping training".format(train_loss))
-            assert math.isfinite(train_loss)
-
-        if args.use_amp:
-            # this attribute is added by timm on one optimizer (adahessian)
-            is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
-            loss /= update_freq
-            grad_norm = loss_scaler(loss, optimizer, clip_grad=max_norm,
-                                    parameters=model_s.parameters(), create_graph=is_second_order,
-                                    update_grad=True)
-            # if (data_iter_step + 1) % update_freq == 0:
-            optimizer.zero_grad()
-        else: # full precision
-            loss /= update_freq
-            loss.backward()
-            # if (data_iter_step + 1) % update_freq == 0:
-            optimizer.step()
-            optimizer.zero_grad()
-
-        # if (data_iter_step + 1) % update_freq == 0:
-        if model_ema is not None:
-            for iter_model_ema in model_ema:
-                iter_model_ema.update(model_s)
-                for i in range(len(iter_model_ema.ema.stages)):
-                    if hasattr(iter_model_ema.ema.stages[i], 'act_learn'):
-                        iter_model_ema.ema.stages[i].act_learn = model_s.module.stages[i].act_learn
-                    if hasattr(iter_model_ema.ema, 'act_learn'):
-                        iter_model_ema.ema.act_learn = model_s.module.act_learn
-        
-        
-        min_lr = 10.
-        max_lr = 0.
-        for group in optimizer.param_groups:
-            min_lr = min(min_lr, group["lr"])
-            max_lr = max(max_lr, group["lr"])
-
-        
+        if accumulated_batches == update_freq:
+            scaler.step(optimizer) 
+            scaler.update() 
+            optimizer.zero_grad() 
+            accumulated_batches = 0 
+            if model_ema is not None:
+                for iter_model_ema in model_ema:
+                    iter_model_ema.update(model_s)
+                    for i in range(len(iter_model_ema.ema.stages)):
+                        if hasattr(iter_model_ema.ema.stages[i], 'act_learn'):
+                            iter_model_ema.ema.stages[i].act_learn = model_s.module.stages[i].act_learn
+                        if hasattr(iter_model_ema.ema, 'act_learn'):
+                            iter_model_ema.ema.act_learn = model_s.module.act_learn
+                        
         top1_num = (output_s.argmax(dim=1) == y.argmax(dim=1)).float().sum().item()
         top1_total += top1_num
 
