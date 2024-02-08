@@ -244,7 +244,7 @@ def process(pn, args):
         
         omit_fms = 0
         train_acc = ddp_vanilla_train(args, trainloader, model, None, optimizer, epoch, mask, writer, pn, omit_fms, 
-                                      mixup_fn, criterion_ce, loss_scaler, 0, 1, model_ema)
+                                      mixup_fn, criterion_ce, loss_scaler, None, 1, model_ema)
 
         if mask < 0.01 and False:
             test_acc, best_acc = ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn)

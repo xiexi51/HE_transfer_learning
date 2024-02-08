@@ -54,6 +54,8 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
 
     criterion_kd = SoftTarget(4.0).cuda()
 
+    optimizer.zero_grad()
+
     for x, y in pbar:
         # print(pn, x[0,0,0,0].numpy())
         # break
@@ -64,47 +66,42 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
 
         if mixup_fn is not None:
             x, y = mixup_fn(x, y)
-
-        # optimizer.zero_grad()
         
-        if model_t is not None:
-            if args.loss_fm_factor > 0 or args.loss_kd_factor > 0:
-                with torch.no_grad():
-                    if isinstance(model_t, DistributedDataParallel):
-                        model_t.module.if_forward_with_fms = True
-                    else:
-                        model_t.if_forward_with_fms = True
-                    out_t, fms_t = model_t(x)
+        with torch.cuda.amp.autocast(enabled=args.use_amp):
+            if model_t is not None:
+                if args.loss_fm_factor > 0 or args.loss_kd_factor > 0:
+                    with torch.no_grad():
+                        if isinstance(model_t, DistributedDataParallel):
+                            model_t.module.if_forward_with_fms = True
+                        else:
+                            model_t.if_forward_with_fms = True
+                        out_t, fms_t = model_t(x)
 
-        # if args.loss_fm_factor > 0:
-        #     out_s, fms_s = model_s((x, mask))
-        # else:
-        #     if mask is not None:
-        #         out_s = model_s((x, mask))
-        #     else:
-        #         out_s = model_s(x)
+            # if args.loss_fm_factor > 0:
+            #     out_s, fms_s = model_s((x, mask))
+            # else:
+            #     if mask is not None:
+            #         out_s = model_s((x, mask))
+            #     else:
+            #         out_s = model_s(x)
 
-        if args.use_amp:
-            with torch.cuda.amp.autocast():
-                output_s = model_s(x)
-        else:
             output_s = model_s(x)
+        
+            loss = 0
 
-        loss = 0
+            # if args.loss_fm_factor > 0:
+            #     loss_fm = sum(loss_fm_fun(x, y) for x, y in zip(fms_s[omit_fms:], fms_t[omit_fms:])) * args.loss_fm_factor
+            #     loss += loss_fm
+            #     train_loss_fm += loss_fm.item()
+            # if args.loss_kd_factor > 0:
+            #     loss_kd = criterion_kd(out_s, out_t) * args.loss_kd_factor
+            #     loss += loss_kd
+            #     train_loss_kd += loss_kd.item()
 
-        # if args.loss_fm_factor > 0:
-        #     loss_fm = sum(loss_fm_fun(x, y) for x, y in zip(fms_s[omit_fms:], fms_t[omit_fms:])) * args.loss_fm_factor
-        #     loss += loss_fm
-        #     train_loss_fm += loss_fm.item()
-        # if args.loss_kd_factor > 0:
-        #     loss_kd = criterion_kd(out_s, out_t) * args.loss_kd_factor
-        #     loss += loss_kd
-        #     train_loss_kd += loss_kd.item()
-
-        if args.loss_ce_factor > 0:
-            loss_ce = criterion_ce(output_s, y) * args.loss_ce_factor
-            loss += loss_ce
-            train_loss_ce += loss_ce.item()
+            if args.loss_ce_factor > 0:
+                loss_ce = criterion_ce(output_s, y) * args.loss_ce_factor
+                loss += loss_ce
+                train_loss_ce += loss_ce.item()
 
         train_loss += loss.item()
 
@@ -121,28 +118,22 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                                     update_grad=True)
             # if (data_iter_step + 1) % update_freq == 0:
             optimizer.zero_grad()
-            if model_ema is not None:
-                for iter_model_ema in model_ema:
-                    iter_model_ema.update(model_s)
-                    for i in range(len(iter_model_ema.ema.stages)):
-                        if hasattr(iter_model_ema.ema.stages[i], 'act_learn'):
-                            iter_model_ema.ema.stages[i].act_learn = model_s.module.stages[i].act_learn
-                        if hasattr(iter_model_ema.ema, 'act_learn'):
-                            iter_model_ema.ema.act_learn = model_s.module.act_learn
         else: # full precision
             loss /= update_freq
             loss.backward()
             # if (data_iter_step + 1) % update_freq == 0:
             optimizer.step()
             optimizer.zero_grad()
-            if model_ema is not None:
-                for iter_model_ema in model_ema:
-                    iter_model_ema.update(model_s)
-                    for i in range(len(iter_model_ema.ema.stages)):
-                        if hasattr(iter_model_ema.ema.stages[i], 'act_learn'):
-                            iter_model_ema.ema.stages[i].act_learn = model_s.module.stages[i].act_learn
-                        if hasattr(iter_model_ema.ema, 'act_learn'):
-                            iter_model_ema.ema.act_learn = model_s.module.act_learn
+
+        # if (data_iter_step + 1) % update_freq == 0:
+        if model_ema is not None:
+            for iter_model_ema in model_ema:
+                iter_model_ema.update(model_s)
+                for i in range(len(iter_model_ema.ema.stages)):
+                    if hasattr(iter_model_ema.ema.stages[i], 'act_learn'):
+                        iter_model_ema.ema.stages[i].act_learn = model_s.module.stages[i].act_learn
+                    if hasattr(iter_model_ema.ema, 'act_learn'):
+                        iter_model_ema.ema.act_learn = model_s.module.act_learn
         
         
         min_lr = 10.
