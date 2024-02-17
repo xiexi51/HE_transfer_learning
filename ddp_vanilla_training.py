@@ -169,18 +169,18 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn):
     test_acc = 0
     for x, y in pbar:
         x, y = x.cuda(), y.cuda()
-        if args.bf16:
-            x = x.to(dtype=torch.bfloat16)
-        with torch.no_grad():
-            if isinstance(model, DistributedDataParallel):
-                # raise TypeError("should not use DistributedDataParallel model when testing")
-                model.module.if_forward_with_fms = False
-            else:
-                model.if_forward_with_fms = False
-            if mask is not None:
-                out = model((x, mask))
-            else:
-                out = model(x)
+        
+        with torch.cuda.amp.autocast(enabled=args.use_amp):
+            with torch.no_grad():
+                # if isinstance(model, DistributedDataParallel):
+                #     # raise TypeError("should not use DistributedDataParallel model when testing")
+                #     model.module.if_forward_with_fms = False
+                # else:
+                #     model.if_forward_with_fms = False
+                if mask is not None:
+                    out = model((x, mask))
+                else:
+                    out = model(x)
         top1, top5 = accuracy(out, y, topk=(1, 5))
         top1_total += top1[0] * x.size(0)
         top5_total += top5[0] * x.size(0)
@@ -228,12 +228,13 @@ def single_test(args, testloader, model, epoch, best_acc, mask):
         with torch.no_grad():
             if isinstance(model, DistributedDataParallel):
                 raise TypeError("should not use DistributedDataParallel model in single_test")
-            else:
-                model.if_forward_with_fms = True
+            # else:
+            #     model.if_forward_with_fms = True
             if mask is not None:
                 out, fms = model((x, mask))
             else:
-                out, fms = model(x)
+                # out, fms = model(x)
+                out= model(x)
         top1, top5 = accuracy(out, y, topk=(1, 5))
         top1_total += top1[0] * x.size(0)
         top5_total += top5[0] * x.size(0)

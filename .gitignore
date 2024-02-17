@@ -3,3 +3,5 @@
 *.pt
 *.pth
 locals.py
+/dump*
+*.tar.gz

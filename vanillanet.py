@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from timm.models.layers import DropPath
 from timm.models.registry import register_model
+import os
 
 
 # Series informed activation function. Implemented by conv.
@@ -126,6 +127,10 @@ class VanillaNet(nn.Module):
     def __init__(self, in_chans=3, num_classes=1000, dims=[96, 192, 384, 768], 
                  drop_rate=0, act_num=3, strides=[2,2,2,1], deploy=False, ada_pool=None, **kwargs):
         super().__init__()
+
+        self.dump_dir = "/home/uconn/xiexi/HE_transfer_learning/dump"
+        self._dumped_stem2 = True
+
         self.deploy = deploy
         stride, padding = (4, 0) if not ada_pool else (3, 1)
         if self.deploy:
@@ -188,9 +193,26 @@ class VanillaNet(nn.Module):
         if self.deploy:
             x = self.stem(x)
         else:
+            if not self._dumped_stem2:
+                torch.save(x, os.path.join(self.dump_dir, 'input_image.pt'))
+                torch.save(self.stem1.state_dict(), os.path.join(self.dump_dir, 'stem1_state_dict.pt'))
+
             x = self.stem1(x)
+
+            if not self._dumped_stem2:
+                torch.save(x, os.path.join(self.dump_dir, 'stem1_out.pt'))
+
             x = torch.nn.functional.leaky_relu(x,self.act_learn)
-            x = self.stem2(x)
+
+            if not self._dumped_stem2: 
+                torch.save(x, os.path.join(self.dump_dir, 'input_to_stem2.pt'))
+                self._dump_stem2_params()
+                x = self.stem2(x)
+                torch.save(x, os.path.join(self.dump_dir, 'output_from_stem2.pt'))
+                self._dumped_stem2 = True
+            else:
+                x = self.stem2(x)
+
 
         for i in range(self.depth):
             x = self.stages[i](x)
@@ -240,6 +262,11 @@ class VanillaNet(nn.Module):
         self.__delattr__('cls1')
         self.__delattr__('cls2')
         self.deploy = True
+
+    def _dump_stem2_params(self):
+        # for name, param in self.stem2.named_parameters():
+        #     torch.save(param, os.path.join(self.dump_dir, f'stem2_{name}.pt'))
+        torch.save(self.stem2.state_dict(), os.path.join(self.dump_dir, 'stem2_state_dict.pt'))
 
 
 @register_model
