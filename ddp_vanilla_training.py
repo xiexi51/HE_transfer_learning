@@ -187,8 +187,8 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn):
 
         
         reduced_total = torch.tensor(total, dtype=torch.float).cuda().detach()
-        reduced_top1_total = torch.tensor(top1_total, dtype=torch.float).cuda().detach()
-        reduced_top5_total = torch.tensor(top5_total, dtype=torch.float).cuda().detach()
+        reduced_top1_total = top1_total.clone().detach()
+        reduced_top5_total = top5_total.clone().detach()
         dist.reduce(reduced_total, dst=0)
         dist.reduce(reduced_top1_total, dst=0)
         dist.reduce(reduced_top5_total, dst=0)
@@ -303,8 +303,8 @@ def ddp_train_transfer(args, trainloader, model_s, optimizer, epoch, mask, write
         total += x.size(0)
 
         reduced_total = torch.tensor(total, dtype=torch.float).cuda().detach()
-        reduced_top1_total = torch.tensor(top1_total, dtype=torch.float).cuda().detach()
-        reduced_top5_total = torch.tensor(top5_total, dtype=torch.float).cuda().detach()
+        reduced_top1_total = top1_total.clone().detach()
+        reduced_top5_total = top5_total.clone().detach()
         dist.reduce(reduced_total, dst=0)
         dist.reduce(reduced_top1_total, dst=0)
         dist.reduce(reduced_top5_total, dst=0)
