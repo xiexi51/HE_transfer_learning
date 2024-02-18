@@ -75,9 +75,14 @@ class Block(nn.Module):
             )
 
         if not ada_pool:
-            self.pool = nn.Identity() if stride == 1 else nn.MaxPool2d(stride)
+            self.pool = nn.Identity() if stride == 1 else nn.AvgPool2d(stride)
         else:
-            self.pool = nn.Identity() if stride == 1 else nn.AdaptiveMaxPool2d((ada_pool, ada_pool))
+            self.pool = nn.Identity() if stride == 1 else nn.AdaptiveAvgPool2d((ada_pool, ada_pool))
+
+        # if not ada_pool:
+        #     self.pool = nn.Identity() if stride == 1 else nn.MaxPool2d(stride)
+        # else:
+        #     self.pool = nn.Identity() if stride == 1 else nn.AdaptiveMaxPool2d((ada_pool, ada_pool))
 
         self.act = activation(dim_out, act_num, deploy=self.deploy)
  
@@ -193,26 +198,9 @@ class VanillaNet(nn.Module):
         if self.deploy:
             x = self.stem(x)
         else:
-            if not self._dumped_stem2:
-                torch.save(x, os.path.join(self.dump_dir, 'input_image.pt'))
-                torch.save(self.stem1.state_dict(), os.path.join(self.dump_dir, 'stem1_state_dict.pt'))
-
             x = self.stem1(x)
-
-            if not self._dumped_stem2:
-                torch.save(x, os.path.join(self.dump_dir, 'stem1_out.pt'))
-
             x = torch.nn.functional.leaky_relu(x,self.act_learn)
-
-            if not self._dumped_stem2: 
-                torch.save(x, os.path.join(self.dump_dir, 'input_to_stem2.pt'))
-                self._dump_stem2_params()
-                x = self.stem2(x)
-                torch.save(x, os.path.join(self.dump_dir, 'output_from_stem2.pt'))
-                self._dumped_stem2 = True
-            else:
-                x = self.stem2(x)
-
+            x = self.stem2(x)
 
         for i in range(self.depth):
             x = self.stages[i](x)

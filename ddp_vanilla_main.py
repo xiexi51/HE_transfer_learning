@@ -46,13 +46,6 @@ def process(pn, args):
 
     mask_provider = MaskProvider(args.mask_decrease, args.mask_epochs)
 
-    # if args.bf16 or args.fp16:
-    #     if args.bf16:
-    #         raise KeyError("BF16 support is not yet available.")
-    #     if args.fp16:
-    #         raise KeyError("FP16 support is not yet available.")
-            # print("FP16 enabled.")
-
     if pn == 0:
         print("gpu count =", torch.cuda.device_count())
     
@@ -60,8 +53,7 @@ def process(pn, args):
     train_sampler = DistributedSampler(trainset, num_replicas=args.total_gpus, rank=pn)
     trainloader = torch.utils.data.DataLoader(trainset, sampler=train_sampler, batch_size=args.batch_size_train, num_workers=args.num_train_loader_workers, pin_memory=True, shuffle=False, drop_last=True)
     testset = build_imagenet_dataset(False, args) 
-    # test_sampler = DistributedSampler(testset, num_replicas=args.total_gpus, rank=pn)
-    test_sampler = torch.utils.data.SequentialSampler(testset)
+    test_sampler = DistributedSampler(testset, num_replicas=args.total_gpus, rank=pn)
     testloader = torch.utils.data.DataLoader(testset, sampler=test_sampler, batch_size=args.batch_size_test, num_workers=args.num_test_loader_workers, pin_memory=True, shuffle=False, drop_last=False)
 
     mixup_fn = None
@@ -96,13 +88,14 @@ def process(pn, args):
             start_epoch = args.resume_epoch + 1
         checkpoint_path = os.path.join(args.resume_dir, f'checkpoint_epoch_{start_epoch - 1}.pth')
 
-    if checkpoint_path and os.path.exists(checkpoint_path):
-        print(f"Loading checkpoint: {checkpoint_path}")
-        checkpoint = torch.load(checkpoint_path)
-        # model.load_state_dict(checkpoint['model_state_dict'], strict=True)
-        model.load_state_dict(checkpoint['model_ema'], strict=True)
-    else:
-        print(f"No checkpoint found at {checkpoint_path}")
+    if args.reload or args.resume:
+        if checkpoint_path and os.path.exists(checkpoint_path):
+            print(f"Loading checkpoint: {checkpoint_path}")
+            checkpoint = torch.load(checkpoint_path)
+            # model.load_state_dict(checkpoint['model_state_dict'], strict=True)
+            model.load_state_dict(checkpoint['model_ema'], strict=True)
+        else:
+            print(f"No checkpoint found at {checkpoint_path}")
     
     
     model = model.cuda()
@@ -128,23 +121,7 @@ def process(pn, args):
     test_acc = 0
     best_acc = 0
 
-    if args.reload or args.resume:
-        if start_epoch == 0:
-            _test_epoch = 0
-        else:
-            _test_epoch = start_epoch - 1
-        
-        if pn == 0:
-            test_acc, best_acc = single_test(args, testloader, model, _test_epoch, best_acc, None)
-        
-        dist.barrier()
-    
-    return
-
-
     model = DistributedDataParallel(model, device_ids=[pn])
-
-    
 
     # if args.bf16:
     #     model = convert_to_bf16_except_bn(model)
@@ -230,8 +207,10 @@ def process(pn, args):
             _test_epoch = 0
         else:
             _test_epoch = start_epoch - 1
-        test_acc, best_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, mask_provider.get_mask(_test_epoch), writer, pn)
+        test_acc, best_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, None, writer, pn)
 
+    return 
+    
     for epoch in range(start_epoch, args.total_epochs):
         if args.lr_step_size > 0:
             adjust_learning_rate(optimizer, epoch, args.lr, args.lr_step_size, args.lr_gamma)

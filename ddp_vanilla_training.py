@@ -173,7 +173,6 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn):
         with torch.cuda.amp.autocast(enabled=args.use_amp):
             with torch.no_grad():
                 # if isinstance(model, DistributedDataParallel):
-                #     # raise TypeError("should not use DistributedDataParallel model when testing")
                 #     model.module.if_forward_with_fms = False
                 # else:
                 #     model.if_forward_with_fms = False
