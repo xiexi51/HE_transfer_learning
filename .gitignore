@@ -5,3 +5,4 @@
 locals.py
 /dump*
 *.tar.gz
+tmp*

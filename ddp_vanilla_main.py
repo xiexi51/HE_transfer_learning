@@ -1,15 +1,10 @@
 import os
 import torch
 import torch.optim as optim
-import torchvision
-import torchvision.transforms as transforms
-from torchvision.models import resnet18, ResNet18_Weights
 import argparse
 from torch.utils.tensorboard import SummaryWriter
 import ast
 from model import ResNet18Poly, general_relu_poly, convert_to_bf16_except_bn, find_submodule, copy_parameters
-from model_relu_avg import ResNet18ReluAvg
-from model_relu import ResNet18Relu
 import numpy as np
 import re
 from ddp_vanilla_training import ddp_vanilla_train, ddp_test, single_test
@@ -21,7 +16,7 @@ import torch.multiprocessing as mp
 import torch.distributed as dist
 from utils_dataset import build_imagenet_dataset
 from timm.data import Mixup
-from vanillanet import vanillanet_6
+from vanillanet_deploy import vanillanet_6
 import timm
 from timm.utils import ModelEma
 from optim_factory import create_optimizer
@@ -40,7 +35,6 @@ def process(pn, args):
 
     torch.manual_seed(10)
     torch.cuda.manual_seed_all(10)
-
     
     start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 
@@ -64,8 +58,13 @@ def process(pn, args):
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=1000 )
 
-
-    model = timm.models.create_model("vanillanet_6", pretrained=False, num_classes=1000, act_num=args.act_num, drop_rate=args.drop_rate, deploy=args.deploy)
+    model = vanillanet_6(act_num=args.act_num, drop_rate=args.drop_rate)
+    
+    if pn == 0:
+        if args.deploy:
+            print("create deploy model")
+        else:
+            print("create full model")
 
     checkpoint = None
 
@@ -93,15 +92,17 @@ def process(pn, args):
             print(f"Loading checkpoint: {checkpoint_path}")
             checkpoint = torch.load(checkpoint_path)
             # model.load_state_dict(checkpoint['model_state_dict'], strict=True)
-            model.load_state_dict(checkpoint['model_ema'], strict=True)
+            # model.load_state_dict(checkpoint['model'], strict=True)
+            model.load_state_dict(checkpoint, strict=True)
         else:
             print(f"No checkpoint found at {checkpoint_path}")
     
-    
     model = model.cuda()
 
-    if args.switch_to_deploy:
+    if args.switch_to_deploy and False:
         model.switch_to_deploy()
+        if pn == 0:
+            torch.save(model.state_dict(), "/home/uconn/xiexi/HE_transfer_learning/runs_vanilla6/deploy_vanilla6_acc74.pth")
         # model_ckpt = dict()
         # model_ckpt['model'] = model.state_dict()
         # torch.save(model_ckpt, args.switch_to_deploy)
