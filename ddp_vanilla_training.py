@@ -12,12 +12,10 @@ from torch.utils.tensorboard import SummaryWriter
 from timm.data import Mixup
 from timm.utils import ModelEma
 
-
-# def ddp_train(args, trainloader, model_s, model_t, optimizer, epoch, mask, writer, pn, omit_fms, mixup_fn, criterion_ce, loss_scaler):
 def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Module, model_t: torch.nn.Module, optimizer: torch.optim.Optimizer, 
               epoch: int, mask: float, writer: SummaryWriter, pn: int, omit_fms: int, mixup_fn: Mixup, criterion_ce: torch.nn.Module, 
               max_norm: float, update_freq: int, model_ema: List[ModelEma]):
-    model_s.train()
+    model_s.eval()
     if model_t is not None:
         model_t.eval()
 
@@ -78,31 +76,37 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                             model_t.module.if_forward_with_fms = True
                         else:
                             model_t.if_forward_with_fms = True
-                        out_t, fms_t = model_t(x)
+                        out_t, fms_t = model_t((x, -1))
 
-            # if args.loss_fm_factor > 0:
-            #     out_s, fms_s = model_s((x, mask))
-            # else:
-            #     if mask is not None:
-            #         out_s = model_s((x, mask))
-            #     else:
-            #         out_s = model_s(x)
-
-            output_s = model_s(x)
+            if args.loss_fm_factor > 0:
+                if isinstance(model_s, DistributedDataParallel):
+                    model_s.module.if_forward_with_fms = True
+                else:
+                    model_s.if_forward_with_fms = True
+                out_s, fms_s = model_s((x, mask))
+            else:
+                if isinstance(model_s, DistributedDataParallel):
+                    model_s.module.if_forward_with_fms = False
+                else:
+                    model_s.if_forward_with_fms = False
+                if mask is not None:
+                    out_s = model_s((x, mask))
+                else:
+                    out_s = model_s(x)
         
             loss = 0
 
-            # if args.loss_fm_factor > 0:
-            #     loss_fm = sum(loss_fm_fun(x, y) for x, y in zip(fms_s[omit_fms:], fms_t[omit_fms:])) * args.loss_fm_factor
-            #     loss += loss_fm
-            #     train_loss_fm += loss_fm.item()
-            # if args.loss_kd_factor > 0:
-            #     loss_kd = criterion_kd(out_s, out_t) * args.loss_kd_factor
-            #     loss += loss_kd
-            #     train_loss_kd += loss_kd.item()
+            if args.loss_fm_factor > 0:
+                loss_fm = sum(loss_fm_fun(x, y) for x, y in zip(fms_s[omit_fms:], fms_t[omit_fms:])) * args.loss_fm_factor
+                loss += loss_fm
+                train_loss_fm += loss_fm.item()
+            if args.loss_kd_factor > 0:
+                loss_kd = criterion_kd(out_s, out_t) * args.loss_kd_factor
+                loss += loss_kd
+                train_loss_kd += loss_kd.item()
 
             if args.loss_ce_factor > 0:
-                loss_ce = criterion_ce(output_s, y) * args.loss_ce_factor
+                loss_ce = criterion_ce(out_s, y) * args.loss_ce_factor
                 loss += loss_ce
                 train_loss_ce += loss_ce.item()
 
@@ -126,7 +130,7 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                         if hasattr(iter_model_ema.ema, 'act_learn'):
                             iter_model_ema.ema.act_learn = model_s.module.act_learn
                         
-        top1_num = (output_s.argmax(dim=1) == y.argmax(dim=1)).float().sum().item()
+        top1_num = (out_s.argmax(dim=1) == y.argmax(dim=1)).float().sum().item()
         top1_total += top1_num
 
         total += x.size(0)
@@ -172,10 +176,10 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn):
         
         with torch.cuda.amp.autocast(enabled=args.use_amp):
             with torch.no_grad():
-                # if isinstance(model, DistributedDataParallel):
-                #     model.module.if_forward_with_fms = False
-                # else:
-                #     model.if_forward_with_fms = False
+                if isinstance(model, DistributedDataParallel):
+                    model.module.if_forward_with_fms = False
+                else:
+                    model.if_forward_with_fms = False
                 if mask is not None:
                     out = model((x, mask))
                 else:
@@ -227,12 +231,11 @@ def single_test(args, testloader, model, epoch, best_acc, mask):
         with torch.no_grad():
             if isinstance(model, DistributedDataParallel):
                 raise TypeError("should not use DistributedDataParallel model in single_test")
-            # else:
-            #     model.if_forward_with_fms = True
-            if mask is not None:
-                out, fms = model((x, mask))
             else:
-                # out, fms = model(x)
+                model.if_forward_with_fms = False
+            if mask is not None:
+                out = model((x, mask))
+            else:
                 out= model(x)
         top1, top5 = accuracy(out, y, topk=(1, 5))
         top1_total += top1[0] * x.size(0)

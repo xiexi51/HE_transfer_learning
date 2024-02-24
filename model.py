@@ -24,26 +24,33 @@ class general_relu_poly(nn.Module):
         
         self.factors = nn.Parameter(torch.FloatTensor(factors), requires_grad=False)
     
-    def forward(self, input, mask):
-        if self.if_channel:
-            weights = self.weight.unsqueeze(-1).unsqueeze(-1)
-            weights = weights.expand(-1, -1, input.size(2), input.size(3))
-            # square_term = weights[:, 0, :, :] * torch.mul(input, input) * self.factors[0]
-            # linear_term = weights[:, 1, :, :] * input * self.factors[1]
-            # constant_term = weights[:, 2, :, :] * self.factors[2]
-            y = (weights[:, 0, :, :] * self.factors[0] * input + weights[:, 1, :, :] * self.factors[1]) * input + weights[:, 2, :, :] * self.factors[2]
-            
-        else:
-            y = (self.weight[0] * self.factors[0] * input + self.weight[1] * self.factors[1]) * input + self.weight[2] * self.factors[2]
+    def forward(self, x, mask):
+        # num_le_zero = torch.le(x, 0).sum().item()
+        # total_num = x.numel()
+        # ratio = num_le_zero / total_num
+        # print(f"The proportion of elements that are less than or equal to 0 is: {ratio:.2f}")
 
-        if mask is not None:
+        if mask is None or mask == -1:
+            y = F.relu(x)
+        else:
+            if self.if_channel:
+                weights = self.weight.unsqueeze(-1).unsqueeze(-1)
+                weights = weights.expand(-1, -1, x.size(2), x.size(3))
+                # square_term = weights[:, 0, :, :] * torch.mul(x, x) * self.factors[0]
+                # linear_term = weights[:, 1, :, :] * x * self.factors[1]
+                # constant_term = weights[:, 2, :, :] * self.factors[2]
+                y = (weights[:, 0, :, :] * self.factors[0] * x + weights[:, 1, :, :] * self.factors[1]) * x + weights[:, 2, :, :] * self.factors[2]
+                
+            else:
+                y = (self.weight[0] * self.factors[0] * x + self.weight[1] * self.factors[1]) * x + self.weight[2] * self.factors[2]
+
             if self.if_pixel:
                 if self.rand_mask is None:
-                    self.rand_mask = nn.Parameter(torch.rand(input.shape[1:], device=input.device), requires_grad=False)
+                    self.rand_mask = nn.Parameter(torch.rand(x.shape[1:], device=x.device), requires_grad=False)
                 if_relu = mask > self.rand_mask
-                y = F.relu(input) * if_relu.float() + y * (1 - if_relu.float())
+                y = F.relu(x) * if_relu.float() + y * (1 - if_relu.float()) 
             else:
-                y = F.relu(input) * mask + y * (1 - mask)
+                y = F.relu(x) * mask + y * (1 - mask)
 
         return y
     

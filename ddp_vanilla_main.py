@@ -16,7 +16,7 @@ import torch.multiprocessing as mp
 import torch.distributed as dist
 from utils_dataset import build_imagenet_dataset
 from timm.data import Mixup
-from vanillanet_deploy import vanillanet_6
+from vanillanet_deploy import vanillanet_6_poly
 import timm
 from timm.utils import ModelEma
 from optim_factory import create_optimizer
@@ -48,7 +48,9 @@ def process(pn, args):
     trainloader = torch.utils.data.DataLoader(trainset, sampler=train_sampler, batch_size=args.batch_size_train, num_workers=args.num_train_loader_workers, pin_memory=True, shuffle=False, drop_last=True)
     testset = build_imagenet_dataset(False, args) 
     test_sampler = DistributedSampler(testset, num_replicas=args.total_gpus, rank=pn)
+    single_test_sampler = torch.utils.data.SequentialSampler(testset)
     testloader = torch.utils.data.DataLoader(testset, sampler=test_sampler, batch_size=args.batch_size_test, num_workers=args.num_test_loader_workers, pin_memory=True, shuffle=False, drop_last=False)
+    single_testloader = torch.utils.data.DataLoader(testset, sampler=single_test_sampler, batch_size=args.batch_size_test, num_workers=args.num_test_loader_workers, drop_last=False)
 
     mixup_fn = None
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
@@ -58,7 +60,12 @@ def process(pn, args):
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=1000 )
 
-    model = vanillanet_6(act_num=args.act_num, drop_rate=args.drop_rate)
+    model = vanillanet_6_poly(args.poly_weight_inits, args.poly_weight_factors)
+
+    model_t = vanillanet_6_poly([0, 0, 0], [0, 0, 0])
+
+    dummy_input = torch.rand(1, 3, 224, 224) 
+    model((dummy_input, 0))
     
     if pn == 0:
         if args.deploy:
@@ -89,17 +96,27 @@ def process(pn, args):
 
     if args.reload or args.resume:
         if checkpoint_path and os.path.exists(checkpoint_path):
-            print(f"Loading checkpoint: {checkpoint_path}")
+            if pn == 0:
+                print(f"Loading checkpoint: {checkpoint_path}")
             checkpoint = torch.load(checkpoint_path)
             # model.load_state_dict(checkpoint['model_state_dict'], strict=True)
             # model.load_state_dict(checkpoint['model'], strict=True)
-            model.load_state_dict(checkpoint, strict=True)
+            model.load_state_dict(checkpoint, strict=False)
+            model_t.load_state_dict(checkpoint, strict=False)
         else:
-            print(f"No checkpoint found at {checkpoint_path}")
+            if pn == 0:
+                print(f"No checkpoint found at {checkpoint_path}")
     
+    
+    # for param in model.cls.parameters():
+    #     param.requires_grad = False
+
     model = model.cuda()
 
-    if args.switch_to_deploy and False:
+    model_t = model_t.cuda()
+
+    if args.switch_to_deploy:
+        raise ValueError("don't switch to deploy here")
         model.switch_to_deploy()
         if pn == 0:
             torch.save(model.state_dict(), "/home/uconn/xiexi/HE_transfer_learning/runs_vanilla6/deploy_vanilla6_acc74.pth")
@@ -117,10 +134,6 @@ def process(pn, args):
             )
         if pn == 0:
             print("Using EMA with decay = %s" % args.model_ema_decay)
-    
-    
-    test_acc = 0
-    best_acc = 0
 
     model = DistributedDataParallel(model, device_ids=[pn])
 
@@ -144,8 +157,6 @@ def process(pn, args):
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.total_epochs)
 
     assert not(lr_scheduler is not None and args.lr_step_size > 0), "should not use both lr_anneal and lr_step"
-
-    # scaler = torch.cuda.amp.GradScaler(enabled=args.bf16 or args.fp16)
 
     if mixup_fn is not None:
         if args.bce_loss:
@@ -196,22 +207,31 @@ def process(pn, args):
     #     for arg, value in vars(args).items():
     #         print(f"{arg}: {value}")
 
+    test_acc = 0
+    best_acc = 0
 
     if args.model_ema and args.model_ema_eval:
         max_accuracy_ema = 0.0
         max_accuracy_ema_epoch = 0
         best_ema_decay = args.model_ema_decay[0]
 
-
     if args.reload or args.resume:
         if start_epoch == 0:
             _test_epoch = 0
         else:
             _test_epoch = start_epoch - 1
-        test_acc, best_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, None, writer, pn)
 
-    return 
-    
+        _mask = mask_provider.get_mask(0)
+        # if pn == 0:            
+        #     total_elements, relu_elements = model.module.get_relu_density(_mask)    
+        #     print(f"total_elements {total_elements}, relu_elements {relu_elements}, relu density = {relu_elements/total_elements}")
+        # test_acc, best_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, _mask, writer, pn)
+
+    # if pn == 0:
+    #     print("test model_t:")
+    #     _, _ = single_test(args, single_testloader, model_t, 0, 0, -1)
+    # dist.barrier()
+
     for epoch in range(start_epoch, args.total_epochs):
         if args.lr_step_size > 0:
             adjust_learning_rate(optimizer, epoch, args.lr, args.lr_step_size, args.lr_gamma)
@@ -219,15 +239,16 @@ def process(pn, args):
         train_sampler.set_epoch(epoch)
         mask = mask_provider.get_mask(epoch)
 
-        if args.decay_linear:
-            act_learn = epoch / args.decay_epochs * 1.0
-        else:
-            act_learn = 0.5 * (1 - math.cos(math.pi * epoch / args.decay_epochs)) * 1.0
-        model.module.change_act(act_learn)
+        # if args.decay_linear:
+        #     act_learn = epoch / args.decay_epochs * 1.0
+        # else:
+        #     act_learn = 0.5 * (1 - math.cos(math.pi * epoch / args.decay_epochs)) * 1.0
+        # model.module.change_act(act_learn)
 
+        # mask = 0
 
         if pn == 0:
-            # print("mask = ", mask)
+            print("mask = ", mask)
             writer.add_scalar('Mask value', mask, epoch)
             if args.pixel_wise:
                 if isinstance(model, DistributedDataParallel):
@@ -237,11 +258,11 @@ def process(pn, args):
                 print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
         
         omit_fms = 0
-        train_acc = ddp_vanilla_train(args=args, trainloader=trainloader, model_s=model, model_t=None, optimizer=optimizer, epoch=epoch, 
+        train_acc = ddp_vanilla_train(args=args, trainloader=trainloader, model_s=model, model_t=model_t, optimizer=optimizer, epoch=epoch, 
                                       mask=mask, writer=writer, pn=pn, omit_fms=omit_fms, mixup_fn=mixup_fn, criterion_ce=criterion_ce, 
-                                      max_norm=None, update_freq=args.update_freq, model_ema=model_ema)
+                                      max_norm=None, update_freq=args.update_freq, model_ema=None)
 
-        if mask < 0.01 and False:
+        if mask < 0.01 or True:
             test_acc, best_acc = ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn)
 
         if lr_scheduler is not None:
@@ -278,13 +299,13 @@ if __name__ == "__main__":
     # general settings
     parser.add_argument('--id', default=0, type=int)
     parser.add_argument('--batch_size_train', type=int, default=200, help='Batch size for training')
-    parser.add_argument('--batch_size_test', type=int, default=96, help='Batch size for testing')
+    parser.add_argument('--batch_size_test', type=int, default=200, help='Batch size for testing')
     parser.add_argument('--num_train_loader_workers', type=int, default=6)
     parser.add_argument('--num_test_loader_workers', type=int, default=5)
     parser.add_argument('--pbar', type=ast.literal_eval, default=True)
     parser.add_argument('--log_root', type=str)
 
-    parser.add_argument('--switch_to_deploy', default=None, type=str)
+    parser.add_argument('--switch_to_deploy', type=ast.literal_eval, default=False)
 
     parser.add_argument('--update_freq', default=1, type=int, help='gradient accumulation steps')
 
@@ -314,7 +335,7 @@ if __name__ == "__main__":
 
     # training params
     parser.add_argument('--total_epochs', default=300, type=int)
-    parser.add_argument('--lr', default=0.0003, type=float, help='learning rate')
+    parser.add_argument('--lr', default=5e-3, type=float, help='learning rate')
     parser.add_argument('--momentum', default=0.9, type=float)
     parser.add_argument('--w_decay', default=1e-4, type=float, help='w decay rate')
     parser.add_argument('--optim', type=str, default='adamw', choices = ['sgd', 'adamw', 'lamb'])
@@ -332,14 +353,13 @@ if __name__ == "__main__":
     parser.add_argument('--model_ema_force_cpu', type=ast.literal_eval, default=False, help='')
     parser.add_argument('--model_ema_eval', type=ast.literal_eval, default=False, help='Using ema to eval during training.')
 
-
     parser.add_argument('--train_subset', type=ast.literal_eval, default=False, help='if train on the 1/13 subset of ImageNet or the full ImageNet')
     parser.add_argument('--pixel_wise', type=ast.literal_eval, default=True, help='if use pixel-wise poly replacement')
     parser.add_argument('--channel_wise', type=ast.literal_eval, default=True, help='if use channel-wise relu_poly class')
-    parser.add_argument('--poly_weight_inits', nargs=3, type=float, default=[0, 1, 0], help='relu_poly weights initial values')
-    parser.add_argument('--poly_weight_factors', nargs=3, type=float, default=[0.03, 1, 0.1], help='adjust the learning rate of the three weights in relu_poly')
-    parser.add_argument('--mask_decrease', type=str, default='0', choices = ['0', '1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
-    parser.add_argument('--mask_epochs', default=10, type=int, help='the epoch that the relu replacing mask will decrease to 0')
+    parser.add_argument('--poly_weight_inits', nargs=3, type=float, default=[0, 0.0, 0], help='relu_poly weights initial values')
+    parser.add_argument('--poly_weight_factors', nargs=3, type=float, default=[0.05, 0.5, 0.1], help='adjust the learning rate of the three weights in relu_poly')
+    parser.add_argument('--mask_decrease', type=str, default='1-sinx', choices = ['0', '1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
+    parser.add_argument('--mask_epochs', default=6, type=int, help='the epoch that the relu replacing mask will decrease to 0')
     parser.add_argument('--loss_fm_type', type=str, default='at', choices = ['at', 'mse', 'custom_mse'], help='the type for the feature map loss')
     parser.add_argument('--loss_fm_factor', default=100, type=float, help='the factor of the feature map loss, set to 0 to disable')
     parser.add_argument('--loss_ce_factor', default=1, type=float, help='the factor of the cross-entropy loss, set to 0 to disable')
