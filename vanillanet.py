@@ -74,15 +74,15 @@ class Block(nn.Module):
                 nn.BatchNorm2d(dim_out, eps=1e-6)
             )
 
-        if not ada_pool:
-            self.pool = nn.Identity() if stride == 1 else nn.AvgPool2d(stride)
-        else:
-            self.pool = nn.Identity() if stride == 1 else nn.AdaptiveAvgPool2d((ada_pool, ada_pool))
-
         # if not ada_pool:
-        #     self.pool = nn.Identity() if stride == 1 else nn.MaxPool2d(stride)
+        #     self.pool = nn.Identity() if stride == 1 else nn.AvgPool2d(stride)
         # else:
-        #     self.pool = nn.Identity() if stride == 1 else nn.AdaptiveMaxPool2d((ada_pool, ada_pool))
+        #     self.pool = nn.Identity() if stride == 1 else nn.AdaptiveAvgPool2d((ada_pool, ada_pool))
+
+        if not ada_pool:
+            self.pool = nn.Identity() if stride == 1 else nn.MaxPool2d(stride)
+        else:
+            self.pool = nn.Identity() if stride == 1 else nn.AdaptiveMaxPool2d((ada_pool, ada_pool))
 
         self.act = activation(dim_out, act_num, deploy=self.deploy)
  

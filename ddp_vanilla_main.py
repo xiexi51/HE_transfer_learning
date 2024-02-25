@@ -16,7 +16,9 @@ import torch.multiprocessing as mp
 import torch.distributed as dist
 from utils_dataset import build_imagenet_dataset
 from timm.data import Mixup
-from vanillanet_deploy import vanillanet_6_poly
+# from vanillanet_deploy import vanillanet_6_poly
+from vanillanet import vanillanet_6
+
 import timm
 from timm.utils import ModelEma
 from optim_factory import create_optimizer
@@ -60,12 +62,16 @@ def process(pn, args):
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=1000 )
 
-    model = vanillanet_6_poly(args.poly_weight_inits, args.poly_weight_factors)
+    # model = vanillanet_6_poly(args.poly_weight_inits, args.poly_weight_factors)
 
-    model_t = vanillanet_6_poly([0, 0, 0], [0, 0, 0])
+    # model_t = vanillanet_6_poly([0, 0, 0], [0, 0, 0])
+        
+    model = vanillanet_6()
 
-    dummy_input = torch.rand(1, 3, 224, 224) 
-    model((dummy_input, 0))
+    model_t = None
+
+    # dummy_input = torch.rand(1, 3, 224, 224) 
+    # model((dummy_input, 0))
     
     if pn == 0:
         if args.deploy:
@@ -99,10 +105,12 @@ def process(pn, args):
             if pn == 0:
                 print(f"Loading checkpoint: {checkpoint_path}")
             checkpoint = torch.load(checkpoint_path)
-            # model.load_state_dict(checkpoint['model_state_dict'], strict=True)
+            model.load_state_dict(checkpoint['model_state_dict'], strict=True)
             # model.load_state_dict(checkpoint['model'], strict=True)
-            model.load_state_dict(checkpoint, strict=False)
-            model_t.load_state_dict(checkpoint, strict=False)
+            
+            # model.load_state_dict(checkpoint, strict=True)
+            
+            # model_t.load_state_dict(checkpoint, strict=False)
         else:
             if pn == 0:
                 print(f"No checkpoint found at {checkpoint_path}")
@@ -113,7 +121,8 @@ def process(pn, args):
 
     model = model.cuda()
 
-    model_t = model_t.cuda()
+    if model_t is not None:
+        model_t = model_t.cuda()
 
     if args.switch_to_deploy:
         raise ValueError("don't switch to deploy here")
@@ -225,12 +234,20 @@ def process(pn, args):
         # if pn == 0:            
         #     total_elements, relu_elements = model.module.get_relu_density(_mask)    
         #     print(f"total_elements {total_elements}, relu_elements {relu_elements}, relu density = {relu_elements/total_elements}")
+        
         # test_acc, best_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, _mask, writer, pn)
+
+        # test_acc, best_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, None, writer, pn)
+
+        # return
 
     # if pn == 0:
     #     print("test model_t:")
     #     _, _ = single_test(args, single_testloader, model_t, 0, 0, -1)
     # dist.barrier()
+        
+    start_epoch = 300
+    args.total_epochs = 500
 
     for epoch in range(start_epoch, args.total_epochs):
         if args.lr_step_size > 0:
@@ -238,6 +255,8 @@ def process(pn, args):
 
         train_sampler.set_epoch(epoch)
         mask = mask_provider.get_mask(epoch)
+
+        mask = None 
 
         # if args.decay_linear:
         #     act_learn = epoch / args.decay_epochs * 1.0
@@ -248,14 +267,15 @@ def process(pn, args):
         # mask = 0
 
         if pn == 0:
-            print("mask = ", mask)
-            writer.add_scalar('Mask value', mask, epoch)
-            if args.pixel_wise:
-                if isinstance(model, DistributedDataParallel):
-                    total_elements, relu_elements = model.module.get_relu_density(mask)
-                else:
-                    total_elements, relu_elements = model.get_relu_density(mask)
-                print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
+            if mask is not None:
+                print("mask = ", mask)
+                writer.add_scalar('Mask value', mask, epoch)
+            # if args.pixel_wise:
+            #     if isinstance(model, DistributedDataParallel):
+            #         total_elements, relu_elements = model.module.get_relu_density(mask)
+            #     else:
+            #         total_elements, relu_elements = model.get_relu_density(mask)
+            #     print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
         
         omit_fms = 0
         train_acc = ddp_vanilla_train(args=args, trainloader=trainloader, model_s=model, model_t=model_t, optimizer=optimizer, epoch=epoch, 
@@ -361,9 +381,9 @@ if __name__ == "__main__":
     parser.add_argument('--mask_decrease', type=str, default='1-sinx', choices = ['0', '1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
     parser.add_argument('--mask_epochs', default=6, type=int, help='the epoch that the relu replacing mask will decrease to 0')
     parser.add_argument('--loss_fm_type', type=str, default='at', choices = ['at', 'mse', 'custom_mse'], help='the type for the feature map loss')
-    parser.add_argument('--loss_fm_factor', default=100, type=float, help='the factor of the feature map loss, set to 0 to disable')
+    parser.add_argument('--loss_fm_factor', default=0, type=float, help='the factor of the feature map loss, set to 0 to disable')
     parser.add_argument('--loss_ce_factor', default=1, type=float, help='the factor of the cross-entropy loss, set to 0 to disable')
-    parser.add_argument('--loss_kd_factor', default=0.1, type=float, help='the factor of the knowledge distillation loss, set to 0 to disable')
+    parser.add_argument('--loss_kd_factor', default=0, type=float, help='the factor of the knowledge distillation loss, set to 0 to disable')
     parser.add_argument('--lookahead', type=ast.literal_eval, default=True, help='if enable look ahead for the optimizer')
     parser.add_argument('--lr_anneal', type=str, default='None', choices = ['None', 'cos'])
     parser.add_argument('--lr_step_size', type=int, default=100, help="decrease lr every step-size epochs")
