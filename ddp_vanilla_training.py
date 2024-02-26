@@ -201,19 +201,17 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn):
         reduced_top1_total = reduced_top1_total.cpu().numpy()
         reduced_top5_total = reduced_top5_total.cpu().numpy()
 
+        test_acc = reduced_top1_total/reduced_total
         if args.pbar and pn == 0:
             pbar.set_postfix_str(f"1a {100*reduced_top1_total/reduced_total:.2f}, 5a {100*reduced_top5_total/reduced_total:.2f}, best {100*best_acc:.2f}")
         
-        test_acc = reduced_top1_total/reduced_total
+        
 
     # test_acc = (top1_total / total).item()
     if writer is not None:
         writer.add_scalar('Accuracy/test', test_acc, epoch)
-    
-    if test_acc > best_acc:
-        best_acc = test_acc
 
-    return test_acc, best_acc
+    return test_acc
 
 def single_test(args, testloader, model, epoch, best_acc, mask):
     model.eval()
@@ -242,18 +240,17 @@ def single_test(args, testloader, model, epoch, best_acc, mask):
         top5_total += top5[0] * x.size(0)
         total += x.size(0)
 
+        test_acc = top1_total/total
         if args.pbar:
             pbar.set_postfix_str(f"1a {100*top1_total/total:.2f}, 5a {100*top5_total/total:.2f}, best {100*best_acc:.2f}")
         
-        test_acc = top1_total/total
+        
 
     # if writer is not None:
     #     writer.add_scalar('Accuracy/test', test_acc, epoch)
     
-    if test_acc > best_acc:
-        best_acc = test_acc
 
-    return test_acc, best_acc
+    return test_acc
 
 
 def ddp_train_transfer(args, trainloader, model_s, optimizer, epoch, mask, writer, pn):

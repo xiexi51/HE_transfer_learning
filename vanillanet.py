@@ -60,8 +60,12 @@ class activation(nn.ReLU):
 class Block(nn.Module):
     def __init__(self, dim, dim_out, act_num=3, stride=2, deploy=False, ada_pool=None):
         super().__init__()
+        self.dim = dim
+        self.dim_out = dim_out
         self.act_learn = 1
         self.deploy = deploy
+        self.stride = stride
+
         if self.deploy:
             self.conv = nn.Conv2d(dim, dim_out, kernel_size=1)
         else:
@@ -74,32 +78,39 @@ class Block(nn.Module):
                 nn.BatchNorm2d(dim_out, eps=1e-6)
             )
 
-        # if not ada_pool:
-        #     self.pool = nn.Identity() if stride == 1 else nn.AvgPool2d(stride)
-        # else:
-        #     self.pool = nn.Identity() if stride == 1 else nn.AdaptiveAvgPool2d((ada_pool, ada_pool))
-
         if not ada_pool:
-            self.pool = nn.Identity() if stride == 1 else nn.MaxPool2d(stride)
+            self.pool = nn.Identity() if stride == 1 else nn.AvgPool2d(stride)
         else:
-            self.pool = nn.Identity() if stride == 1 else nn.AdaptiveMaxPool2d((ada_pool, ada_pool))
+            self.pool = nn.Identity() if stride == 1 else nn.AdaptiveAvgPool2d((ada_pool, ada_pool))
 
         self.act = activation(dim_out, act_num, deploy=self.deploy)
+
+        # Shortcut connection
+        if dim != dim_out or stride != 1:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(dim, dim_out, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(dim_out)
+            )
+        else:
+            self.shortcut = nn.Identity()
  
     def forward(self, x):
+        identity = self.shortcut(x)
+
         if self.deploy:
-            x = self.conv(x)
+            out = self.conv(x)
         else:
-            x = self.conv1(x)
+            out = self.conv1(x)
             
             # We use leakyrelu to implement the deep training technique.
-            x = torch.nn.functional.leaky_relu(x,self.act_learn)
+            out = torch.nn.functional.leaky_relu(out, self.act_learn)
             
-            x = self.conv2(x)
+            out = self.conv2(out)
 
-        x = self.pool(x)
-        x = self.act(x)
-        return x
+        out = self.pool(out)
+        out += identity  # Add shortcut connection
+        out = self.act(out)
+        return out
 
     def _fuse_bn_tensor(self, conv, bn):
         kernel = conv.weight
@@ -187,7 +198,8 @@ class VanillaNet(nn.Module):
     def _init_weights(self, m):
         if isinstance(m, (nn.Conv2d, nn.Linear)):
             nn.init.trunc_normal_(m.weight, std=.02)
-            nn.init.constant_(m.bias, 0)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
 
     def change_act(self, m):
         for i in range(self.depth):

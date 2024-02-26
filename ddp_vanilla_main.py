@@ -17,7 +17,7 @@ import torch.distributed as dist
 from utils_dataset import build_imagenet_dataset
 from timm.data import Mixup
 # from vanillanet_deploy import vanillanet_6_poly
-from vanillanet import vanillanet_6
+from vanillanet import vanillanet_5
 
 import timm
 from timm.utils import ModelEma
@@ -66,7 +66,7 @@ def process(pn, args):
 
     # model_t = vanillanet_6_poly([0, 0, 0], [0, 0, 0])
         
-    model = vanillanet_6()
+    model = vanillanet_5()
 
     model_t = None
 
@@ -235,9 +235,9 @@ def process(pn, args):
         #     total_elements, relu_elements = model.module.get_relu_density(_mask)    
         #     print(f"total_elements {total_elements}, relu_elements {relu_elements}, relu density = {relu_elements/total_elements}")
         
-        # test_acc, best_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, _mask, writer, pn)
+        # test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, _mask, writer, pn)
 
-        # test_acc, best_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, None, writer, pn)
+        # test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, None, writer, pn)
 
         # return
 
@@ -246,8 +246,10 @@ def process(pn, args):
     #     _, _ = single_test(args, single_testloader, model_t, 0, 0, -1)
     # dist.barrier()
         
-    start_epoch = 300
-    args.total_epochs = 500
+    # start_epoch = 300
+    # args.total_epochs = 500
+
+    recent_checkpoints = []
 
     for epoch in range(start_epoch, args.total_epochs):
         if args.lr_step_size > 0:
@@ -258,11 +260,11 @@ def process(pn, args):
 
         mask = None 
 
-        # if args.decay_linear:
-        #     act_learn = epoch / args.decay_epochs * 1.0
-        # else:
-        #     act_learn = 0.5 * (1 - math.cos(math.pi * epoch / args.decay_epochs)) * 1.0
-        # model.module.change_act(act_learn)
+        if args.decay_linear:
+            act_learn = epoch / args.decay_epochs * 1.0
+        else:
+            act_learn = 0.5 * (1 - math.cos(math.pi * epoch / args.decay_epochs)) * 1.0
+        model.module.change_act(act_learn)
 
         # mask = 0
 
@@ -282,8 +284,8 @@ def process(pn, args):
                                       mask=mask, writer=writer, pn=pn, omit_fms=omit_fms, mixup_fn=mixup_fn, criterion_ce=criterion_ce, 
                                       max_norm=None, update_freq=args.update_freq, model_ema=None)
 
-        if mask < 0.01 or True:
-            test_acc, best_acc = ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn)
+        if True or mask < 0.01:
+            test_acc = ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn)
 
         if lr_scheduler is not None:
             lr_scheduler.step()
@@ -297,14 +299,36 @@ def process(pn, args):
                 lr_scheduler_state_dict = None
             else:
                 lr_scheduler_state_dict = lr_scheduler.state_dict()
+            
+            with open(f"{log_dir}/acc.txt", 'a') as file:
+                file.write(f'{epoch} train {train_acc*100:.2f} test {test_acc*100:.2f} best {best_acc*100:.2f}\n')
+
+            if test_acc > best_acc:
+                best_acc = test_acc
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model_state_dict,
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'lr_scheduler_state_dict': lr_scheduler_state_dict,
+                    'best_acc': best_acc,
+                }, f"{log_dir}/best_model.pth")
+
+            checkpoint_path = f"{log_dir}/checkpoint_epoch_{epoch}.pth"
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model_state_dict,
                 'optimizer_state_dict': optimizer.state_dict(),
                 'lr_scheduler_state_dict': lr_scheduler_state_dict,
-            }, f"{log_dir}/checkpoint_epoch_{epoch}.pth")
-            with open(f"{log_dir}/acc.txt", 'a') as file:
-                file.write(f'{epoch} train {train_acc*100:.2f} test {test_acc*100:.2f} best {best_acc*100:.2f}\n')
+                'test_acc': test_acc,
+            }, checkpoint_path)
+
+            recent_checkpoints.append(checkpoint_path)
+            if len(recent_checkpoints) > 5:
+                oldest_checkpoint = recent_checkpoints.pop(0)
+                os.remove(oldest_checkpoint)
+
+        dist.barrier()
+            
 
     if writer is not None:
         writer.close()
