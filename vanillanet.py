@@ -86,16 +86,30 @@ class Block(nn.Module):
         self.act = activation(dim_out, act_num, deploy=self.deploy)
 
         # Shortcut connection
-        if dim != dim_out or stride != 1:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(dim, dim_out, kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm2d(dim_out)
-            )
-        else:
-            self.shortcut = nn.Identity()
+        # if dim != dim_out or stride != 1:
+        #     self.shortcut = nn.Sequential(
+        #         nn.Conv2d(dim, dim_out, kernel_size=1, stride=stride, bias=False),
+        #         nn.BatchNorm2d(dim_out)
+        #     )
+        # else:
+        #     self.shortcut = nn.Identity()
+
+        self.use_pooling = stride != 1 or dim != dim_out
+        if self.use_pooling:
+            self.pooling = nn.AvgPool2d(kernel_size=stride, stride=stride, padding=0)
+        
+        self.adjust_channels = dim != dim_out
+        if self.adjust_channels:
+            self.channel_padding = nn.ConstantPad1d((0, dim_out - dim), 0)  # Only pad the last dim (channels)
+
  
     def forward(self, x):
-        identity = self.shortcut(x)
+        identity = x
+        if self.use_pooling:
+            identity = self.pooling(identity)
+        if self.adjust_channels:
+            # Pad the channels without adding any parameters
+            identity = F.pad(identity, (0, 0, 0, 0, 0, identity.size(1)), "constant", 0)
 
         if self.deploy:
             out = self.conv(x)

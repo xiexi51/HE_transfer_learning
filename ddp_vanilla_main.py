@@ -301,7 +301,7 @@ def process(pn, args):
                 lr_scheduler_state_dict = lr_scheduler.state_dict()
             
             with open(f"{log_dir}/acc.txt", 'a') as file:
-                file.write(f'{epoch} train {train_acc*100:.2f} test {test_acc*100:.2f} best {best_acc*100:.2f}\n')
+                file.write(f"{epoch} train {train_acc*100:.2f} test {test_acc*100:.2f} best {best_acc*100:.2f} Lr {optimizer.param_groups[0]['lr']:.2e} act_learn {act_learn:.2f}\n")
 
             if test_acc > best_acc:
                 best_acc = test_acc
@@ -409,9 +409,9 @@ if __name__ == "__main__":
     parser.add_argument('--loss_ce_factor', default=1, type=float, help='the factor of the cross-entropy loss, set to 0 to disable')
     parser.add_argument('--loss_kd_factor', default=0, type=float, help='the factor of the knowledge distillation loss, set to 0 to disable')
     parser.add_argument('--lookahead', type=ast.literal_eval, default=True, help='if enable look ahead for the optimizer')
-    parser.add_argument('--lr_anneal', type=str, default='None', choices = ['None', 'cos'])
-    parser.add_argument('--lr_step_size', type=int, default=100, help="decrease lr every step-size epochs")
-    parser.add_argument('--lr_gamma', type=float, default=0.3, help="decrease lr by a factor of lr-gamma")
+    parser.add_argument('--lr_anneal', type=str, default='cos', choices = ['None', 'cos'])
+    parser.add_argument('--lr_step_size', type=int, default=0, help="decrease lr every step-size epochs")
+    parser.add_argument('--lr_gamma', type=float, default=0.1, help="decrease lr by a factor of lr-gamma")
 
     # parser.add_argument('--bf16', type=ast.literal_eval, default=False, help='if enable training with bf16 precision')
     # parser.add_argument('--fp16', type=ast.literal_eval, default=False, help='if enable training with float16 precision')
