@@ -450,6 +450,11 @@ if __name__ == "__main__":
 
     print("master port = " + os.environ['MASTER_PORT'])
 
+    if args.keep_checkpoints == -1:
+        print("keep all checkpoints")
+    else:
+        print(f"keep latest {args.keep_checkpoints} checkpoints")
+
     def parse_args_line(line):
         key, value = line.split(": ", 1)
         try:
@@ -477,7 +482,8 @@ if __name__ == "__main__":
                 key, value = parse_args_line(line.strip())
                 if hasattr(args, key) and not key.startswith('resume') and not key.startswith('reload'):
                     if (not key.startswith('batch_size') and not key == 'lr' and not key.startswith('num_train_loader') 
-                        and not key.startswith('num_test_loader') and not key == 'total_epochs' and not key == 'master_port'):
+                        and not key.startswith('num_test_loader') and not key == 'total_epochs' and not key == 'master_port'
+                        and not key == 'keep_checkpoints'):
                         setattr(args, key, value)
 
     args.total_gpus = torch.cuda.device_count()
