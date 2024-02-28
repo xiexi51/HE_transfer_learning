@@ -335,8 +335,9 @@ def process(pn, args):
 
 if __name__ == "__main__":
 
+    os.environ['NCCL_DEBUG'] = 'WARN'
     os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '29505'
+    os.environ['MASTER_PORT'] = '9501'
 
     parser = argparse.ArgumentParser(description='Fully poly replacement on ResNet for ImageNet')
 
