@@ -162,8 +162,11 @@ def process(pn, args):
     
     if args.lr_anneal is None or args.lr_anneal == "None":
         lr_scheduler = None
-    elif args.lr_anneal == "cos":
-        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.total_epochs)
+    else:
+        if args.lr_anneal_tmax is None:
+            args.lr_anneal_tmax = args.total_epochs
+        if args.lr_anneal == "cos":
+            lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.lr_anneal_tmax)
 
     assert not(lr_scheduler is not None and args.lr_step_size > 0), "should not use both lr_anneal and lr_step"
 
@@ -411,6 +414,7 @@ if __name__ == "__main__":
     parser.add_argument('--loss_kd_factor', default=0, type=float, help='the factor of the knowledge distillation loss, set to 0 to disable')
     parser.add_argument('--lookahead', type=ast.literal_eval, default=True, help='if enable look ahead for the optimizer')
     parser.add_argument('--lr_anneal', type=str, default='cos', choices = ['None', 'cos'])
+    parser.add_argument('--lr_anneal_tmax', type=int, default=None)
     parser.add_argument('--lr_step_size', type=int, default=0, help="decrease lr every step-size epochs")
     parser.add_argument('--lr_gamma', type=float, default=0.1, help="decrease lr by a factor of lr-gamma")
 
@@ -424,7 +428,7 @@ if __name__ == "__main__":
     parser.add_argument('--resume_log_root', type=ast.literal_eval, default=False)
 
     parser.add_argument('--reload', type=ast.literal_eval, default=False)
-    parser.add_argument('--reload_dir', type=str)
+    parser.add_argument('--reload_file', type=str)
 
     # parser.add_argument("--local_rank", default=os.getenv('LOCAL_RANK', -1), type=int)
 
