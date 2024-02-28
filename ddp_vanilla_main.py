@@ -339,10 +339,6 @@ def process(pn, args):
 
 if __name__ == "__main__":
 
-    os.environ['NCCL_DEBUG'] = 'WARN'
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '9501'
-
     parser = argparse.ArgumentParser(description='Fully poly replacement on ResNet for ImageNet')
 
     # general settings
@@ -353,6 +349,8 @@ if __name__ == "__main__":
     parser.add_argument('--num_test_loader_workers', type=int, default=5)
     parser.add_argument('--pbar', type=ast.literal_eval, default=True)
     parser.add_argument('--log_root', type=str)
+
+    parser.add_argument("--master_port", type=int, default=None)
 
     parser.add_argument('--switch_to_deploy', type=ast.literal_eval, default=False)
 
@@ -435,6 +433,15 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    os.environ['NCCL_DEBUG'] = 'WARN'
+    os.environ['MASTER_ADDR'] = 'localhost'
+    if args.master_port is None:
+        os.environ['MASTER_PORT'] = '9501'
+    else:
+        os.environ['MASTER_PORT'] = str(args.master_port)
+
+    print("master port = " + os.environ['MASTER_PORT'])
+
     def parse_args_line(line):
         key, value = line.split(": ", 1)
         try:
@@ -461,7 +468,8 @@ if __name__ == "__main__":
             for line in file:
                 key, value = parse_args_line(line.strip())
                 if hasattr(args, key) and not key.startswith('resume') and not key.startswith('reload'):
-                    if not key.startswith('batch_size') and not key == 'lr' and not key.startswith('num_train_loader') and not key.startswith('num_test_loader') and not key == 'total_epochs':
+                    if (not key.startswith('batch_size') and not key == 'lr' and not key.startswith('num_train_loader') 
+                        and not key.startswith('num_test_loader') and not key == 'total_epochs' and not key == 'master_port'):
                         setattr(args, key, value)
 
     args.total_gpus = torch.cuda.device_count()
