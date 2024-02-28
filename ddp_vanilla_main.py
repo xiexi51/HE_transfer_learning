@@ -441,7 +441,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    os.environ['NCCL_DEBUG'] = 'WARN'
+    os.environ['NCCL_DEBUG'] = 'ERROR'
     os.environ['MASTER_ADDR'] = 'localhost'
     if args.master_port is None:
         os.environ['MASTER_PORT'] = '9501'
