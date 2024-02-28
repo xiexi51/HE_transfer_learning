@@ -285,10 +285,14 @@ def process(pn, args):
         omit_fms = 0
         train_acc = ddp_vanilla_train(args=args, trainloader=trainloader, model_s=model, model_t=model_t, optimizer=optimizer, epoch=epoch, 
                                       mask=mask, writer=writer, pn=pn, omit_fms=omit_fms, mixup_fn=mixup_fn, criterion_ce=criterion_ce, 
-                                      max_norm=None, update_freq=args.update_freq, model_ema=None)
+                                      max_norm=None, update_freq=args.update_freq, model_ema=None, act_learn=act_learn)
 
         if True or mask < 0.01:
             test_acc = ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn)
+
+        if pn == 0:
+            with open(f"{log_dir}/acc.txt", 'a') as file:
+                file.write(f"{epoch} train {train_acc*100:.2f} test {test_acc*100:.2f} best {best_acc*100:.2f} Lr {optimizer.param_groups[0]['lr']:.2e} act_learn {act_learn:.2f}\n")
 
         if lr_scheduler is not None:
             lr_scheduler.step()
@@ -303,9 +307,6 @@ def process(pn, args):
             else:
                 lr_scheduler_state_dict = lr_scheduler.state_dict()
             
-            with open(f"{log_dir}/acc.txt", 'a') as file:
-                file.write(f"{epoch} train {train_acc*100:.2f} test {test_acc*100:.2f} best {best_acc*100:.2f} Lr {optimizer.param_groups[0]['lr']:.2e} act_learn {act_learn:.2f}\n")
-
             if test_acc > best_acc:
                 best_acc = test_acc
                 torch.save({

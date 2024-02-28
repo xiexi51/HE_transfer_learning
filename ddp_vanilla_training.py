@@ -24,7 +24,7 @@ def set_forward_with_fms(model, if_forward_with_fms):
 
 def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Module, model_t: torch.nn.Module, optimizer: torch.optim.Optimizer, 
               epoch: int, mask: float, writer: SummaryWriter, pn: int, omit_fms: int, mixup_fn: Mixup, criterion_ce: torch.nn.Module, 
-              max_norm: float, update_freq: int, model_ema: List[ModelEma]):
+              max_norm: float, update_freq: int, model_ema: List[ModelEma], act_learn: float):
     # model_s.eval()
 
     model_s.train()
@@ -38,7 +38,11 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
     train_loss_fm = 0
 
     if args.pbar and pn == 0:
-        pbar = tqdm(trainloader, total=len(trainloader), desc=f"Epo {epoch} Lr {optimizer.param_groups[0]['lr']:.1e}", ncols=125)
+        if act_learn is not None:
+            desc = f"{epoch} Lr{optimizer.param_groups[0]['lr']:.2e} act{act_learn:.2f}"
+        else:
+            desc = f"{epoch} Lr{optimizer.param_groups[0]['lr']:.2e}"
+        pbar = tqdm(trainloader, total=len(trainloader), desc=desc, ncols=125)
     else:
         pbar = trainloader
 
