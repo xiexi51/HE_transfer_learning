@@ -263,10 +263,14 @@ def process(pn, args):
 
         mask = None 
 
-        if args.decay_linear:
-            act_learn = epoch / args.decay_epochs * 1.0
+        if epoch < args.decay_epochs:
+            if args.decay_linear:
+                act_learn = epoch / args.decay_epochs * 1.0
+            else:
+                act_learn = 0.5 * (1 - math.cos(math.pi * epoch / args.decay_epochs)) * 1.0
         else:
-            act_learn = 0.5 * (1 - math.cos(math.pi * epoch / args.decay_epochs)) * 1.0
+            act_learn = 1
+        
         model.module.change_act(act_learn)
 
         # mask = 0
@@ -327,9 +331,11 @@ def process(pn, args):
             }, checkpoint_path)
 
             recent_checkpoints.append(checkpoint_path)
-            if len(recent_checkpoints) > 5:
-                oldest_checkpoint = recent_checkpoints.pop(0)
-                os.remove(oldest_checkpoint)
+
+            if args.keep_checkpoints != -1:
+                if len(recent_checkpoints) > args.keep_checkpoints:
+                    oldest_checkpoint = recent_checkpoints.pop(0)
+                    os.remove(oldest_checkpoint)
 
         dist.barrier()
             
@@ -428,6 +434,8 @@ if __name__ == "__main__":
 
     parser.add_argument('--reload', type=ast.literal_eval, default=False)
     parser.add_argument('--reload_file', type=str)
+
+    parser.add_argument('--keep_checkpoints', type=int, default=-1, help="Specify the number of recent checkpoints to keep. Set to -1 to keep all checkpoints.")
 
     # parser.add_argument("--local_rank", default=os.getenv('LOCAL_RANK', -1), type=int)
 
