@@ -66,8 +66,12 @@ class BlockAvg(nn.Module):
         self.deploy = deploy
         self.stride = stride
 
+        self.keep_bn = keep_bn
+
         if self.deploy:
             self.conv = nn.Conv2d(dim, dim_out, kernel_size=1)
+            if self.keep_bn:
+                self.bn = nn.BatchNorm2d(dim_out, eps=1e-6)
         else:
             self.conv1 = nn.Sequential(
                 nn.Conv2d(dim, dim, kernel_size=1),
@@ -109,6 +113,8 @@ class BlockAvg(nn.Module):
 
         if self.deploy:
             out = self.conv(x)
+            if self.keep_bn:
+                out = self.bn(out)
         else:
             out = self.conv1(x)
             
@@ -143,11 +149,16 @@ class BlockAvg(nn.Module):
         kernel, bias = self._fuse_bn_tensor(self.conv1[0], self.conv1[1])
         self.conv1[0].weight.data = kernel
         self.conv1[0].bias.data = bias
-        # kernel, bias = self.conv2[0].weight.data, self.conv2[0].bias.data
-        kernel, bias = self._fuse_bn_tensor(self.conv2[0], self.conv2[1])
+
+        if self.keep_bn:
+            kernel, bias = self.conv2[0].weight.data, self.conv2[0].bias.data
+            self.bn = self.conv2[1]
+        else:
+            kernel, bias = self._fuse_bn_tensor(self.conv2[0], self.conv2[1])
         self.conv = self.conv2[0]
         self.conv.weight.data = torch.matmul(kernel.transpose(1,3), self.conv1[0].weight.data.squeeze(3).squeeze(2)).transpose(1,3)
         self.conv.bias.data = bias + (self.conv1[0].bias.data.view(1,-1,1,1)*kernel).sum(3).sum(2).sum(1)
+
         self.__delattr__('conv1')
         self.__delattr__('conv2')
         self.act.switch_to_deploy()
@@ -163,12 +174,14 @@ class VanillaNetAvg(nn.Module):
         self._dumped_stem2 = True
 
         self.deploy = deploy
+        self.keep_bn = keep_bn
+
         stride, padding = (4, 0) if not ada_pool else (3, 1)
         if self.deploy:
-            self.stem = nn.Sequential(
-                nn.Conv2d(in_chans, dims[0], kernel_size=4, stride=stride, padding=padding),
-                activation(dims[0], act_num, deploy=self.deploy)
-            )
+            self.stem_conv = nn.Conv2d(in_chans, dims[0], kernel_size=4, stride=stride, padding=padding)
+            if self.keep_bn:
+                self.stem_bn = nn.BatchNorm2d(dims[0], eps=1e-6)
+            self.stem_act = activation(dims[0], act_num, deploy=self.deploy)
         else:
             self.stem1 = nn.Sequential(
                 nn.Conv2d(in_chans, dims[0], kernel_size=4, stride=stride, padding=padding),
@@ -223,7 +236,10 @@ class VanillaNetAvg(nn.Module):
 
     def forward(self, x):
         if self.deploy:
-            x = self.stem(x)
+            x = self.stem_conv(x)
+            if self.keep_bn:
+                x = self.stem_bn(x)
+            x = self.stem_act(x)
         else:
             x = self.stem1(x)
             x = torch.nn.functional.leaky_relu(x,self.act_learn)
@@ -257,10 +273,18 @@ class VanillaNetAvg(nn.Module):
         kernel, bias = self._fuse_bn_tensor(self.stem1[0], self.stem1[1])
         self.stem1[0].weight.data = kernel
         self.stem1[0].bias.data = bias
-        kernel, bias = self._fuse_bn_tensor(self.stem2[0], self.stem2[1])
+        if self.keep_bn:
+            kernel, bias = self.stem2[0].weight.data, self.stem2[0].bias.data
+        else:
+            kernel, bias = self._fuse_bn_tensor(self.stem2[0], self.stem2[1])
         self.stem1[0].weight.data = torch.einsum('oi,icjk->ocjk', kernel.squeeze(3).squeeze(2), self.stem1[0].weight.data)
         self.stem1[0].bias.data = bias + (self.stem1[0].bias.data.view(1,-1,1,1)*kernel).sum(3).sum(2).sum(1)
-        self.stem = torch.nn.Sequential(*[self.stem1[0], self.stem2[2]])
+        # self.stem = torch.nn.Sequential(*[self.stem1[0], self.stem2[2]])
+        self.stem_conv = self.stem1[0]
+        if self.keep_bn:
+            self.stem_bn = self.stem2[1]
+        self.stem_act = self.stem2[2]
+
         self.__delattr__('stem1')
         self.__delattr__('stem2')
 

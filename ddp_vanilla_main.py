@@ -8,7 +8,7 @@ from model import ResNet18Poly, general_relu_poly, convert_to_bf16_except_bn, fi
 import numpy as np
 import re
 from ddp_vanilla_training import ddp_vanilla_train, ddp_test, single_test
-from utils import MaskProvider
+from utils import MaskProvider, change_print_for_distributed
 from datetime import datetime
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data.distributed import DistributedSampler
@@ -17,7 +17,7 @@ import torch.distributed as dist
 from utils_dataset import build_imagenet_dataset
 from timm.data import Mixup
 from vanillanet_deploy_poly import vanillanet_5_deploy_poly, vanillanet_6_deploy_poly, VanillaNet_deploy_poly
-# from vanillanet_avg import vanillanet_5_avg, vanillanet_6_avg
+from vanillanet_avg import vanillanet_5_avg, vanillanet_6_avg
 
 import timm
 from timm.utils import ModelEma
@@ -33,6 +33,7 @@ def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
         param_group['lr'] = lr
 
 def process(pn, args):
+    change_print_for_distributed(pn == 0)
     torch.cuda.set_device(pn)
     process_group = torch.distributed.init_process_group(backend="nccl", init_method='env://', world_size=args.total_gpus, rank=pn)
 
@@ -43,8 +44,7 @@ def process(pn, args):
 
     mask_provider = MaskProvider(args.mask_decrease, args.mask_epochs)
 
-    if pn == 0:
-        print("gpu count =", torch.cuda.device_count())
+    print("gpu count =", torch.cuda.device_count())
     
     trainset = build_imagenet_dataset(True, args)
     train_sampler = DistributedSampler(trainset, num_replicas=args.total_gpus, rank=pn)
@@ -74,15 +74,14 @@ def process(pn, args):
     # model = vanillanet_6_avg(if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
 
     model_t = None
-
-    dummy_input = torch.rand(1, 3, 224, 224) 
-    model((dummy_input, 0))
     
-    if pn == 0:
-        if isinstance(model, VanillaNet_deploy_poly):
-            print("create deploy model")
-        else:
-            print("create full model")
+    if isinstance(model, VanillaNet_deploy_poly):
+        dummy_input = torch.rand(1, 3, 224, 224) 
+        model((dummy_input, 0))
+        _msg = "create deploy model"
+    else:
+        _msg = "create full model"
+    print(f"{_msg}, shortcut = {args.vanilla_shortcut}, keep_bn = {args.vanilla_keep_bn}")
 
     checkpoint = None
 
@@ -107,8 +106,7 @@ def process(pn, args):
 
     if args.reload or args.resume:
         if checkpoint_path and os.path.exists(checkpoint_path):
-            if pn == 0:
-                print(f"Loading checkpoint: {checkpoint_path}")
+            print(f"Loading checkpoint: {checkpoint_path}")
             checkpoint = torch.load(checkpoint_path)
 
             # model.load_state_dict(checkpoint['model_state_dict'], strict=True)
@@ -118,8 +116,7 @@ def process(pn, args):
             
             # model_t.load_state_dict(checkpoint, strict=False)
         else:
-            if pn == 0:
-                print(f"No checkpoint found at {checkpoint_path}")
+            print(f"No checkpoint found at {checkpoint_path}")
     
     
     # for param in model.cls.parameters():
@@ -131,11 +128,12 @@ def process(pn, args):
         model_t = model_t.cuda()
 
     if args.switch_to_deploy:
-        # raise ValueError("don't switch to deploy here")
+        raise ValueError("don't switch to deploy here")
         model.switch_to_deploy()
+        print(f"switch to deploy with keep_bn = {args.vanilla_keep_bn}")
         if pn == 0:
             # torch.save(model.state_dict(), os.path.join(proj_root, "save_vanilla6_avg_acc74/deploy_vanilla6_acc74.pth"))
-            torch.save(model.state_dict(), os.path.join(proj_root, "save_vanilla5_avg_shortcut_acc70/deploy_vanilla5_shortcut_acc70.pth"))
+            torch.save(model.state_dict(), os.path.join(proj_root, "save_vanilla5_avg_shortcut_acc70/deploy_vanilla5_shortcut_keepbn_acc70.pth"))
 
     model_ema = None
     if args.model_ema:
@@ -146,8 +144,7 @@ def process(pn, args):
             model_ema.append(
                 ModelEma(model, decay=ema_decay, device='cpu' if args.model_ema_force_cpu else '', resume='')
             )
-        if pn == 0:
-            print("Using EMA with decay = %s" % args.model_ema_decay)
+        print("Using EMA with decay = %s" % args.model_ema_decay)
 
     model = DistributedDataParallel(model, device_ids=[pn])
 
@@ -245,9 +242,10 @@ def process(pn, args):
         
         # test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, _mask, writer, pn)
 
-        # test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, None, writer, pn)
-
-        test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, -1, writer, pn)
+        if isinstance(model.module, VanillaNet_deploy_poly):
+            test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, -1, writer, pn)
+        else:
+            test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, None, writer, pn)
 
         return
 
@@ -267,8 +265,6 @@ def process(pn, args):
 
         train_sampler.set_epoch(epoch)
         mask = mask_provider.get_mask(epoch)
-
-        mask = None 
 
         if epoch < args.decay_epochs:
             if args.decay_linear:
@@ -375,14 +371,14 @@ if __name__ == "__main__":
     
     # imagenet dataset arguments
     parser.add_argument('--color_jitter', type=float, default=0.4, metavar='PCT', help='Color jitter factor (default: 0.4)')
-    parser.add_argument('--aa', type=str, default='rand-m9-mstd0.5-inc1', metavar='NAME', help='Use AutoAugment policy. "v0" or "original". " + "(default: rand-m9-mstd0.5-inc1)')
+    parser.add_argument('--aa', type=str, default='rand-m7-mstd0.5-inc1', metavar='NAME', help='Use AutoAugment policy. "v0" or "original". " + "(default: rand-m9-mstd0.5-inc1)')
     parser.add_argument('--train_interpolation', type=str, default='bicubic', help='Training interpolation (random, bilinear, bicubic default: "bicubic")')
     parser.add_argument('--reprob', type=float, default=0.25, metavar='PCT', help='Random erase prob (default: 0.25)')
     parser.add_argument('--remode', type=str, default='pixel', help='Random erase mode (default: "pixel")')
     parser.add_argument('--recount', type=int, default=1, help='Random erase count (default: 1)')
 
     # Mixup params
-    parser.add_argument('--mixup', type=float, default=0.8, help='mixup alpha, mixup enabled if > 0.')
+    parser.add_argument('--mixup', type=float, default=0.1, help='mixup alpha, mixup enabled if > 0.')
     parser.add_argument('--cutmix', type=float, default=1.0, help='cutmix alpha, cutmix enabled if > 0.')
     parser.add_argument('--cutmix_minmax', type=float, nargs='+', default=None, help='cutmix min/max ratio, overrides alpha and enables cutmix if set (default: None)')
     parser.add_argument('--mixup_prob', type=float, default=1.0, help='Probability of performing mixup or cutmix when either/both is enabled')
@@ -400,14 +396,14 @@ if __name__ == "__main__":
     parser.add_argument('--total_epochs', default=300, type=int)
     parser.add_argument('--lr', default=5e-3, type=float, help='learning rate')
     parser.add_argument('--momentum', default=0.9, type=float)
-    parser.add_argument('--w_decay', default=1e-4, type=float, help='w decay rate')
-    parser.add_argument('--optim', type=str, default='adamw', choices = ['sgd', 'adamw', 'lamb'])
+    parser.add_argument('--w_decay', default=0e-4, type=float, help='w decay rate')
+    parser.add_argument('--optim', type=str, default='lamb', choices = ['sgd', 'adamw', 'lamb'])
     parser.add_argument('--decay_epochs', default=100, type=int, help='for deep training strategy')
     parser.add_argument('--decay_linear', type=ast.literal_eval, default=True, help='cos/linear for decay manner')
 
     parser.add_argument('--use_amp', type=ast.literal_eval, default=False, help="Use PyTorch's AMP (Automatic Mixed Precision) or not")
     
-    parser.add_argument('--bce_loss', type=ast.literal_eval, default=False, help='Enable BCE loss w/ Mixup/CutMix use.')
+    parser.add_argument('--bce_loss', type=ast.literal_eval, default=True, help='Enable BCE loss w/ Mixup/CutMix use.')
     parser.add_argument('--bce_target_thresh', type=float, default=None, help='Threshold for binarizing softened BCE targets (default: None, disabled)')
 
     # EMA related parameters
@@ -419,14 +415,14 @@ if __name__ == "__main__":
     parser.add_argument('--train_subset', type=ast.literal_eval, default=False, help='if train on the 1/13 subset of ImageNet or the full ImageNet')
     parser.add_argument('--pixel_wise', type=ast.literal_eval, default=True, help='if use pixel-wise poly replacement')
     parser.add_argument('--channel_wise', type=ast.literal_eval, default=True, help='if use channel-wise relu_poly class')
-    parser.add_argument('--poly_weight_inits', nargs=3, type=float, default=[0, 0.0, 0], help='relu_poly weights initial values')
-    parser.add_argument('--poly_weight_factors', nargs=3, type=float, default=[0.05, 0.5, 0.1], help='adjust the learning rate of the three weights in relu_poly')
+    parser.add_argument('--poly_weight_inits', nargs=3, type=float, default=[0, 0.1, 0], help='relu_poly weights initial values')
+    parser.add_argument('--poly_weight_factors', nargs=3, type=float, default=[0.03, 0.5, 0.1], help='adjust the learning rate of the three weights in relu_poly')
     parser.add_argument('--mask_decrease', type=str, default='1-sinx', choices = ['0', '1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
     parser.add_argument('--mask_epochs', default=6, type=int, help='the epoch that the relu replacing mask will decrease to 0')
     parser.add_argument('--loss_fm_type', type=str, default='at', choices = ['at', 'mse', 'custom_mse'], help='the type for the feature map loss')
-    parser.add_argument('--loss_fm_factor', default=0, type=float, help='the factor of the feature map loss, set to 0 to disable')
+    parser.add_argument('--loss_fm_factor', default=100, type=float, help='the factor of the feature map loss, set to 0 to disable')
     parser.add_argument('--loss_ce_factor', default=1, type=float, help='the factor of the cross-entropy loss, set to 0 to disable')
-    parser.add_argument('--loss_kd_factor', default=0, type=float, help='the factor of the knowledge distillation loss, set to 0 to disable')
+    parser.add_argument('--loss_kd_factor', default=0.1, type=float, help='the factor of the knowledge distillation loss, set to 0 to disable')
     parser.add_argument('--lookahead', type=ast.literal_eval, default=True, help='if enable look ahead for the optimizer')
     parser.add_argument('--lr_anneal', type=str, default='cos', choices = ['None', 'cos'])
     parser.add_argument('--lr_anneal_tmax', type=int, default=None)
@@ -444,6 +440,8 @@ if __name__ == "__main__":
 
     parser.add_argument('--reload', type=ast.literal_eval, default=False)
     parser.add_argument('--reload_file', type=str)
+
+    parser.add_argument('--teacher_file', type=str, default=None)
 
     parser.add_argument('--keep_checkpoints', type=int, default=-1, help="Specify the number of recent checkpoints to keep. Set to -1 to keep all checkpoints.")
 

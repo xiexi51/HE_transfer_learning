@@ -8,7 +8,7 @@ from model import ResNet18Poly, general_relu_poly, convert_to_bf16_except_bn, fi
 import numpy as np
 import re
 from ddp_vanilla_training import ddp_vanilla_train, ddp_test, single_test
-from utils import MaskProvider
+from utils import MaskProvider, change_print_for_distributed
 from datetime import datetime
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data.distributed import DistributedSampler
@@ -33,6 +33,7 @@ def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
         param_group['lr'] = lr
 
 def process(pn, args):
+    change_print_for_distributed(pn == 0)
     torch.cuda.set_device(pn)
     process_group = torch.distributed.init_process_group(backend="nccl", init_method='env://', world_size=args.total_gpus, rank=pn)
 
@@ -43,8 +44,7 @@ def process(pn, args):
 
     mask_provider = MaskProvider(args.mask_decrease, args.mask_epochs)
 
-    if pn == 0:
-        print("gpu count =", torch.cuda.device_count())
+    print("gpu count =", torch.cuda.device_count())
     
     trainset = build_imagenet_dataset(True, args)
     train_sampler = DistributedSampler(trainset, num_replicas=args.total_gpus, rank=pn)
@@ -75,22 +75,19 @@ def process(pn, args):
 
     if args.teacher_file is not None:
         model_t = vanillanet_5_deploy_poly([0, 0, 0], [0, 0, 0], if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
-        if pn == 0:
-            print(f"Loading teacher: {args.teacher_file}")     
+        print(f"Loading teacher: {args.teacher_file}")     
         model_t.load_state_dict(torch.load(args.teacher_file), strict=False)
     else:
         model_t = None
-
-    dummy_input = torch.rand(1, 3, 224, 224) 
-    model((dummy_input, 0))
     
     if isinstance(model, VanillaNet_deploy_poly):
         assert args.deploy == True
-        if pn == 0:
-            print("create deploy model")
+        dummy_input = torch.rand(1, 3, 224, 224) 
+        model((dummy_input, 0))
+        _msg = "create deploy model"
     else:
-        if pn == 0:
-            print("create full model")
+        _msg = "create full model"
+    print(f"{_msg}, shortcut = {args.vanilla_shortcut}, keep_bn = {args.vanilla_keep_bn}")
 
     checkpoint = None
 
@@ -115,8 +112,7 @@ def process(pn, args):
 
     if args.reload or args.resume:
         if checkpoint_path and os.path.exists(checkpoint_path):
-            if pn == 0:
-                print(f"Loading checkpoint: {checkpoint_path}")
+            print(f"Loading checkpoint: {checkpoint_path}")
             checkpoint = torch.load(checkpoint_path)
 
             # model.load_state_dict(checkpoint['model_state_dict'], strict=True)
@@ -126,8 +122,7 @@ def process(pn, args):
             
             # model_t.load_state_dict(checkpoint, strict=False)
         else:
-            if pn == 0:
-                print(f"No checkpoint found at {checkpoint_path}")
+            print(f"No checkpoint found at {checkpoint_path}")
     
     
     # for param in model.cls.parameters():
@@ -141,9 +136,10 @@ def process(pn, args):
     if args.switch_to_deploy:
         raise ValueError("don't switch to deploy here")
         model.switch_to_deploy()
+        print(f"switch to deploy with keep_bn = {args.vanilla_keep_bn}")
         if pn == 0:
             # torch.save(model.state_dict(), os.path.join(proj_root, "save_vanilla6_avg_acc74/deploy_vanilla6_acc74.pth"))
-            torch.save(model.state_dict(), os.path.join(proj_root, "save_vanilla5_avg_shortcut_acc70/deploy_vanilla5_shortcut_acc70.pth"))
+            torch.save(model.state_dict(), os.path.join(proj_root, "save_vanilla5_avg_shortcut_acc70/deploy_vanilla5_shortcut_keepbn_acc70.pth"))
 
     model_ema = None
     if args.model_ema:
@@ -154,8 +150,7 @@ def process(pn, args):
             model_ema.append(
                 ModelEma(model, decay=ema_decay, device='cpu' if args.model_ema_force_cpu else '', resume='')
             )
-        if pn == 0:
-            print("Using EMA with decay = %s" % args.model_ema_decay)
+        print("Using EMA with decay = %s" % args.model_ema_decay)
 
     model = DistributedDataParallel(model, device_ids=[pn])
 
@@ -253,9 +248,10 @@ def process(pn, args):
         
         # test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, _mask, writer, pn)
 
-        # test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, None, writer, pn)
-
-        # test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, -1, writer, pn)
+        # if isinstance(model.module, VanillaNet_deploy_poly):
+        #     test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, -1, writer, pn)
+        # else:
+        #     test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, None, writer, pn)
 
         # return
 
@@ -276,8 +272,6 @@ def process(pn, args):
         train_sampler.set_epoch(epoch)
         mask = mask_provider.get_mask(epoch)
 
-        # mask = None 
-
         if not args.deploy:
             if epoch < args.decay_epochs:
                 if args.decay_linear:
@@ -297,11 +291,8 @@ def process(pn, args):
             if mask is not None:
                 print("mask = ", mask)
                 writer.add_scalar('Mask value', mask, epoch)
-            if args.pixel_wise:
-                if isinstance(model, DistributedDataParallel):
-                    total_elements, relu_elements = model.module.get_relu_density(mask)
-                else:
-                    total_elements, relu_elements = model.get_relu_density(mask)
+            if isinstance(model.module, VanillaNet_deploy_poly) and args.pixel_wise:
+                total_elements, relu_elements = model.module.get_relu_density(mask)
                 print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
         
         omit_fms = 0

@@ -15,6 +15,19 @@ def print_available_gpus():
         device_capability = torch.cuda.get_device_capability(i)
         print(f"  GPU {i}: {device_name}, Capability: {device_capability}")
 
+def change_print_for_distributed(is_master):
+    """
+    This function disables printing when not in master process
+    """
+    import builtins as __builtin__
+    builtin_print = __builtin__.print
+    def print(*args, **kwargs):
+        force = kwargs.pop('force', False)
+        if is_master or force:
+            builtin_print(*args, **kwargs)
+    __builtin__.print = print
+
+
 class Lookahead(Optimizer):
     def __init__(self, base_optimizer, alpha=0.5, k=1):
         # NOTE super().__init__() not called on purpose

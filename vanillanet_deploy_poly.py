@@ -43,6 +43,7 @@ class Block_deploy_poly(nn.Module):
         self.act = activation_poly(dim_out, poly_weight_inits, poly_weight_factors, act_num)
 
         self.if_shortcut = if_shortcut
+        self.keep_bn = keep_bn
 
         if self.if_shortcut:
             # Shortcut connection
@@ -53,6 +54,9 @@ class Block_deploy_poly(nn.Module):
             self.adjust_channels = dim != dim_out
             if self.adjust_channels:
                 self.channel_padding = nn.ConstantPad1d((0, dim_out - dim), 0)  # Only pad the last dim (channels)
+        
+        if self.keep_bn:
+            self.bn = nn.BatchNorm2d(dim_out, eps=1e-6)
 
  
     def forward(self, x, mask):
@@ -65,6 +69,8 @@ class Block_deploy_poly(nn.Module):
                 identity = F.pad(identity, (0, 0, 0, 0, 0, identity.size(1)), "constant", 0)
 
         x = self.conv(x)
+        if self.keep_bn:
+            x = self.bn(x)
         x = self.pool(x)
 
         if self.if_shortcut:
@@ -82,10 +88,13 @@ class VanillaNet_deploy_poly(nn.Module):
                  drop_rate=0, act_num=3, strides=[2,2,2,1], if_shortcut=True, keep_bn=False):
         super().__init__()
         stride, padding = 4, 0
-        self.stem = nn.Sequential(
-            nn.Conv2d(in_chans, dims[0], kernel_size=4, stride=stride, padding=padding),
-            activation_poly(dims[0], poly_weight_inits, poly_weight_factors, act_num)
-        )
+
+        self.keep_bn = keep_bn
+        self.stem_conv = nn.Conv2d(in_chans, dims[0], kernel_size=4, stride=stride, padding=padding)
+        if self.keep_bn:
+            self.stem_bn = nn.BatchNorm2d(dims[0], eps=1e-6)
+        self.stem_act = activation_poly(dims[0], poly_weight_inits, poly_weight_factors, act_num)
+
         self.stages = nn.ModuleList()
         for i in range(len(strides)):
             stage = Block_deploy_poly(dims[i], dims[i+1], poly_weight_inits, poly_weight_factors, act_num=act_num, stride=strides[i], if_shortcut=if_shortcut, keep_bn=keep_bn)
@@ -108,8 +117,12 @@ class VanillaNet_deploy_poly(nn.Module):
         if self.if_forward_with_fms:
             fms = []
         x, mask = x_and_mask
-        x = self.stem[0](x)
-        x, fm = self.stem[1](x, mask)
+        x = self.stem_conv(x)
+
+        if self.keep_bn:
+            x = self.stem_bn(x)
+
+        x, fm = self.stem_act(x, mask)
         if self.if_forward_with_fms:
             fms.append(fm)
 
@@ -126,7 +139,7 @@ class VanillaNet_deploy_poly(nn.Module):
             return x
 
     def get_relu_density(self, mask):
-        total_elements, relu_elements = self.stem[1].get_relu_density(mask)
+        total_elements, relu_elements = self.stem_act.get_relu_density(mask)
         for stage in self.stages:
             stage_total, stage_relu = stage.get_relu_density(mask)
             total_elements += stage_total
