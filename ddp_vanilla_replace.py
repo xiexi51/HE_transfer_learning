@@ -289,7 +289,7 @@ def process(pn, args):
             
             model.module.change_act(act_learn)
         else:
-            act_learn = None
+            act_learn = 1
 
         # mask = 1
 
