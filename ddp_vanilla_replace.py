@@ -386,14 +386,14 @@ if __name__ == "__main__":
     
     # imagenet dataset arguments
     parser.add_argument('--color_jitter', type=float, default=0.4, metavar='PCT', help='Color jitter factor (default: 0.4)')
-    parser.add_argument('--aa', type=str, default='rand-m9-mstd0.5-inc1', metavar='NAME', help='Use AutoAugment policy. "v0" or "original". " + "(default: rand-m9-mstd0.5-inc1)')
+    parser.add_argument('--aa', type=str, default='rand-m7-mstd0.5-inc1', metavar='NAME', help='Use AutoAugment policy. "v0" or "original". " + "(default: rand-m9-mstd0.5-inc1)')
     parser.add_argument('--train_interpolation', type=str, default='bicubic', help='Training interpolation (random, bilinear, bicubic default: "bicubic")')
     parser.add_argument('--reprob', type=float, default=0.25, metavar='PCT', help='Random erase prob (default: 0.25)')
     parser.add_argument('--remode', type=str, default='pixel', help='Random erase mode (default: "pixel")')
     parser.add_argument('--recount', type=int, default=1, help='Random erase count (default: 1)')
 
     # Mixup params
-    parser.add_argument('--mixup', type=float, default=0.8, help='mixup alpha, mixup enabled if > 0.')
+    parser.add_argument('--mixup', type=float, default=0.1, help='mixup alpha, mixup enabled if > 0.')
     parser.add_argument('--cutmix', type=float, default=1.0, help='cutmix alpha, cutmix enabled if > 0.')
     parser.add_argument('--cutmix_minmax', type=float, nargs='+', default=None, help='cutmix min/max ratio, overrides alpha and enables cutmix if set (default: None)')
     parser.add_argument('--mixup_prob', type=float, default=1.0, help='Probability of performing mixup or cutmix when either/both is enabled')
@@ -411,14 +411,14 @@ if __name__ == "__main__":
     parser.add_argument('--total_epochs', default=300, type=int)
     parser.add_argument('--lr', default=5e-3, type=float, help='learning rate')
     parser.add_argument('--momentum', default=0.9, type=float)
-    parser.add_argument('--w_decay', default=1e-4, type=float, help='w decay rate')
-    parser.add_argument('--optim', type=str, default='adamw', choices = ['sgd', 'adamw', 'lamb'])
+    parser.add_argument('--w_decay', default=0e-4, type=float, help='w decay rate')
+    parser.add_argument('--optim', type=str, default='lamb', choices = ['sgd', 'adamw', 'lamb'])
     parser.add_argument('--decay_epochs', default=100, type=int, help='for deep training strategy')
     parser.add_argument('--decay_linear', type=ast.literal_eval, default=True, help='cos/linear for decay manner')
 
     parser.add_argument('--use_amp', type=ast.literal_eval, default=False, help="Use PyTorch's AMP (Automatic Mixed Precision) or not")
     
-    parser.add_argument('--bce_loss', type=ast.literal_eval, default=False, help='Enable BCE loss w/ Mixup/CutMix use.')
+    parser.add_argument('--bce_loss', type=ast.literal_eval, default=True, help='Enable BCE loss w/ Mixup/CutMix use.')
     parser.add_argument('--bce_target_thresh', type=float, default=None, help='Threshold for binarizing softened BCE targets (default: None, disabled)')
 
     # EMA related parameters
