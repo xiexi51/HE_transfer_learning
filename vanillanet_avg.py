@@ -57,8 +57,8 @@ class activation(nn.ReLU):
         self.deploy = True
 
 
-class Block(nn.Module):
-    def __init__(self, dim, dim_out, act_num=3, stride=2, deploy=False, ada_pool=None):
+class BlockAvg(nn.Module):
+    def __init__(self, dim, dim_out, act_num=3, stride=2, deploy=False, ada_pool=None, if_shortcut=True, keep_bn = False):
         super().__init__()
         self.dim = dim
         self.dim_out = dim_out
@@ -85,31 +85,27 @@ class Block(nn.Module):
 
         self.act = activation(dim_out, act_num, deploy=self.deploy)
 
-        # Shortcut connection
-        # if dim != dim_out or stride != 1:
-        #     self.shortcut = nn.Sequential(
-        #         nn.Conv2d(dim, dim_out, kernel_size=1, stride=stride, bias=False),
-        #         nn.BatchNorm2d(dim_out)
-        #     )
-        # else:
-        #     self.shortcut = nn.Identity()
+        self.if_shortcut = if_shortcut
 
-        self.use_pooling = stride != 1 or dim != dim_out
-        if self.use_pooling:
-            self.pooling = nn.AvgPool2d(kernel_size=stride, stride=stride, padding=0)
-        
-        self.adjust_channels = dim != dim_out
-        if self.adjust_channels:
-            self.channel_padding = nn.ConstantPad1d((0, dim_out - dim), 0)  # Only pad the last dim (channels)
+        if self.if_shortcut:
+            # Shortcut connection
+            self.use_pooling = stride != 1 or dim != dim_out
+            if self.use_pooling:
+                self.pooling = nn.AvgPool2d(kernel_size=stride, stride=stride, padding=0)
+            
+            self.adjust_channels = dim != dim_out
+            if self.adjust_channels:
+                self.channel_padding = nn.ConstantPad1d((0, dim_out - dim), 0)  # Only pad the last dim (channels)
 
  
     def forward(self, x):
-        identity = x
-        if self.use_pooling:
-            identity = self.pooling(identity)
-        if self.adjust_channels:
-            # Pad the channels without adding any parameters
-            identity = F.pad(identity, (0, 0, 0, 0, 0, identity.size(1)), "constant", 0)
+        if self.if_shortcut:
+            identity = x
+            if self.use_pooling:
+                identity = self.pooling(identity)
+            if self.adjust_channels:
+                # Pad the channels without adding any parameters
+                identity = F.pad(identity, (0, 0, 0, 0, 0, identity.size(1)), "constant", 0)
 
         if self.deploy:
             out = self.conv(x)
@@ -122,7 +118,12 @@ class Block(nn.Module):
             out = self.conv2(out)
 
         out = self.pool(out)
-        out += identity  # Add shortcut connection
+
+        # add bn here ?
+
+        if self.if_shortcut:
+            out += identity  # Add shortcut connection
+        
         out = self.act(out)
         return out
 
@@ -153,9 +154,9 @@ class Block(nn.Module):
         self.deploy = True
     
 
-class VanillaNet(nn.Module):
+class VanillaNetAvg(nn.Module):
     def __init__(self, in_chans=3, num_classes=1000, dims=[96, 192, 384, 768], 
-                 drop_rate=0, act_num=3, strides=[2,2,2,1], deploy=False, ada_pool=None, **kwargs):
+                 drop_rate=0, act_num=3, strides=[2,2,2,1], deploy=False, ada_pool=None, if_shortcut=True, keep_bn=False, **kwargs):
         super().__init__()
 
         self.dump_dir = "/home/uconn/xiexi/HE_transfer_learning/dump"
@@ -184,9 +185,9 @@ class VanillaNet(nn.Module):
         self.stages = nn.ModuleList()
         for i in range(len(strides)):
             if not ada_pool:
-                stage = Block(dim=dims[i], dim_out=dims[i+1], act_num=act_num, stride=strides[i], deploy=deploy)
+                stage = BlockAvg(dim=dims[i], dim_out=dims[i+1], act_num=act_num, stride=strides[i], deploy=deploy, if_shortcut=if_shortcut, keep_bn=keep_bn)
             else:
-                stage = Block(dim=dims[i], dim_out=dims[i+1], act_num=act_num, stride=strides[i], deploy=deploy, ada_pool=ada_pool[i])
+                stage = BlockAvg(dim=dims[i], dim_out=dims[i+1], act_num=act_num, stride=strides[i], deploy=deploy, ada_pool=ada_pool[i], if_shortcut=if_shortcut, keep_bn=keep_bn)
             self.stages.append(stage)
         self.depth = len(strides)
 
@@ -284,75 +285,75 @@ class VanillaNet(nn.Module):
 
 
 @register_model
-def vanillanet_5(pretrained=False,in_22k=False, **kwargs):
-    model = VanillaNet(dims=[128*4, 256*4, 512*4, 1024*4], strides=[2,2,2], **kwargs)
+def vanillanet_5_avg(if_shortcut, keep_bn, **kwargs):
+    model = VanillaNetAvg(dims=[128*4, 256*4, 512*4, 1024*4], strides=[2,2,2], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
     return model
 
 @register_model
-def vanillanet_6(pretrained=False,in_22k=False, **kwargs):
-    model = VanillaNet(dims=[128*4, 256*4, 512*4, 1024*4, 1024*4], strides=[2,2,2,1], **kwargs)
+def vanillanet_6_avg(if_shortcut, keep_bn, **kwargs):
+    model = VanillaNetAvg(dims=[128*4, 256*4, 512*4, 1024*4, 1024*4], strides=[2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
     return model
 
-@register_model
-def vanillanet_7(pretrained=False,in_22k=False, **kwargs):
-    model = VanillaNet(dims=[128*4, 128*4, 256*4, 512*4, 1024*4, 1024*4], strides=[1,2,2,2,1], **kwargs)
-    return model
+# @register_model
+# def vanillanet_7(pretrained=False,in_22k=False, **kwargs):
+#     model = VanillaNet(dims=[128*4, 128*4, 256*4, 512*4, 1024*4, 1024*4], strides=[1,2,2,2,1], **kwargs)
+#     return model
 
-@register_model
-def vanillanet_8(pretrained=False, in_22k=False, **kwargs):
-    model = VanillaNet(dims=[128*4, 128*4, 256*4, 512*4, 512*4, 1024*4, 1024*4], strides=[1,2,2,1,2,1], **kwargs)
-    return model
+# @register_model
+# def vanillanet_8(pretrained=False, in_22k=False, **kwargs):
+#     model = VanillaNet(dims=[128*4, 128*4, 256*4, 512*4, 512*4, 1024*4, 1024*4], strides=[1,2,2,1,2,1], **kwargs)
+#     return model
 
-@register_model
-def vanillanet_9(pretrained=False, in_22k=False, **kwargs):
-    model = VanillaNet(dims=[128*4, 128*4, 256*4, 512*4, 512*4, 512*4, 1024*4, 1024*4], strides=[1,2,2,1,1,2,1], **kwargs)
-    return model
+# @register_model
+# def vanillanet_9(pretrained=False, in_22k=False, **kwargs):
+#     model = VanillaNet(dims=[128*4, 128*4, 256*4, 512*4, 512*4, 512*4, 1024*4, 1024*4], strides=[1,2,2,1,1,2,1], **kwargs)
+#     return model
 
-@register_model
-def vanillanet_10(pretrained=False, in_22k=False, **kwargs):
-    model = VanillaNet(
-        dims=[128*4, 128*4, 256*4, 512*4, 512*4, 512*4, 512*4, 1024*4, 1024*4],
-        strides=[1,2,2,1,1,1,2,1],
-        **kwargs)
-    return model
+# @register_model
+# def vanillanet_10(pretrained=False, in_22k=False, **kwargs):
+#     model = VanillaNet(
+#         dims=[128*4, 128*4, 256*4, 512*4, 512*4, 512*4, 512*4, 1024*4, 1024*4],
+#         strides=[1,2,2,1,1,1,2,1],
+#         **kwargs)
+#     return model
 
-@register_model
-def vanillanet_11(pretrained=False, in_22k=False, **kwargs):
-    model = VanillaNet(
-        dims=[128*4, 128*4, 256*4, 512*4, 512*4, 512*4, 512*4, 512*4, 1024*4, 1024*4],
-        strides=[1,2,2,1,1,1,1,2,1],
-        **kwargs)
-    return model
+# @register_model
+# def vanillanet_11(pretrained=False, in_22k=False, **kwargs):
+#     model = VanillaNet(
+#         dims=[128*4, 128*4, 256*4, 512*4, 512*4, 512*4, 512*4, 512*4, 1024*4, 1024*4],
+#         strides=[1,2,2,1,1,1,1,2,1],
+#         **kwargs)
+#     return model
 
-@register_model
-def vanillanet_12(pretrained=False, in_22k=False, **kwargs):
-    model = VanillaNet(
-        dims=[128*4, 128*4, 256*4, 512*4, 512*4, 512*4, 512*4, 512*4, 512*4, 1024*4, 1024*4],
-        strides=[1,2,2,1,1,1,1,1,2,1],
-        **kwargs)
-    return model
+# @register_model
+# def vanillanet_12(pretrained=False, in_22k=False, **kwargs):
+#     model = VanillaNet(
+#         dims=[128*4, 128*4, 256*4, 512*4, 512*4, 512*4, 512*4, 512*4, 512*4, 1024*4, 1024*4],
+#         strides=[1,2,2,1,1,1,1,1,2,1],
+#         **kwargs)
+#     return model
 
-@register_model
-def vanillanet_13(pretrained=False, in_22k=False, **kwargs):
-    model = VanillaNet(
-        dims=[128*4, 128*4, 256*4, 512*4, 512*4, 512*4, 512*4, 512*4, 512*4, 512*4, 1024*4, 1024*4],
-        strides=[1,2,2,1,1,1,1,1,1,2,1],
-        **kwargs)
-    return model
+# @register_model
+# def vanillanet_13(pretrained=False, in_22k=False, **kwargs):
+#     model = VanillaNet(
+#         dims=[128*4, 128*4, 256*4, 512*4, 512*4, 512*4, 512*4, 512*4, 512*4, 512*4, 1024*4, 1024*4],
+#         strides=[1,2,2,1,1,1,1,1,1,2,1],
+#         **kwargs)
+#     return model
 
-@register_model
-def vanillanet_13_x1_5(pretrained=False, in_22k=False, **kwargs):
-    model = VanillaNet(
-        dims=[128*6, 128*6, 256*6, 512*6, 512*6, 512*6, 512*6, 512*6, 512*6, 512*6, 1024*6, 1024*6],
-        strides=[1,2,2,1,1,1,1,1,1,2,1],
-        **kwargs)
-    return model
+# @register_model
+# def vanillanet_13_x1_5(pretrained=False, in_22k=False, **kwargs):
+#     model = VanillaNet(
+#         dims=[128*6, 128*6, 256*6, 512*6, 512*6, 512*6, 512*6, 512*6, 512*6, 512*6, 1024*6, 1024*6],
+#         strides=[1,2,2,1,1,1,1,1,1,2,1],
+#         **kwargs)
+#     return model
 
-@register_model
-def vanillanet_13_x1_5_ada_pool(pretrained=False, in_22k=False, **kwargs):
-    model = VanillaNet(
-        dims=[128*6, 128*6, 256*6, 512*6, 512*6, 512*6, 512*6, 512*6, 512*6, 512*6, 1024*6, 1024*6],
-        strides=[1,2,2,1,1,1,1,1,1,2,1],
-        ada_pool=[0,38,19,0,0,0,0,0,0,10,0],
-        **kwargs)
-    return model
+# @register_model
+# def vanillanet_13_x1_5_ada_pool(pretrained=False, in_22k=False, **kwargs):
+#     model = VanillaNet(
+#         dims=[128*6, 128*6, 256*6, 512*6, 512*6, 512*6, 512*6, 512*6, 512*6, 512*6, 1024*6, 1024*6],
+#         strides=[1,2,2,1,1,1,1,1,1,2,1],
+#         ada_pool=[0,38,19,0,0,0,0,0,0,10,0],
+#         **kwargs)
+#     return model

@@ -11,14 +11,14 @@ from typing import Iterable, Optional, List
 from torch.utils.tensorboard import SummaryWriter
 from timm.data import Mixup
 from timm.utils import ModelEma
-from vanillanet_deploy import VanillaNet_poly
+from vanillanet_deploy_poly import VanillaNet_deploy_poly
 
 def set_forward_with_fms(model, if_forward_with_fms):
     if isinstance(model, DistributedDataParallel):
-        if isinstance(model.module, VanillaNet_poly):
+        if isinstance(model.module, VanillaNet_deploy_poly):
             model.module.if_forward_with_fms = if_forward_with_fms
     else:
-        if isinstance(model, VanillaNet_poly):
+        if isinstance(model, VanillaNet_deploy_poly):
             model.if_forward_with_fms = if_forward_with_fms
 
 

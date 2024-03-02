@@ -25,24 +25,51 @@ class activation_poly(nn.Module):
         nn.init.trunc_normal_(self.weight, std=.02)
 
     def forward(self, x, mask):
+
         x = self.relu(x, mask)
         fm = x
         x = F.conv2d(x, self.weight, self.bias, padding=self.act_num, groups=self.dim)
+
         return x, fm
     
     def get_relu_density(self, mask):
         return self.relu.get_relu_density(mask)
 
-class Block_poly(nn.Module):
-    def __init__(self, dim, dim_out, poly_weight_inits, poly_weight_factors, act_num=3, stride=2):
+class Block_deploy_poly(nn.Module):
+    def __init__(self, dim, dim_out, poly_weight_inits, poly_weight_factors, act_num=3, stride=2, if_shortcut=True, keep_bn=False):
         super().__init__()
         self.conv = nn.Conv2d(dim, dim_out, kernel_size=1)
         self.pool = nn.Identity() if stride == 1 else nn.AvgPool2d(stride)
         self.act = activation_poly(dim_out, poly_weight_inits, poly_weight_factors, act_num)
+
+        self.if_shortcut = if_shortcut
+
+        if self.if_shortcut:
+            # Shortcut connection
+            self.use_pooling = stride != 1 or dim != dim_out
+            if self.use_pooling:
+                self.pooling = nn.AvgPool2d(kernel_size=stride, stride=stride, padding=0)
+            
+            self.adjust_channels = dim != dim_out
+            if self.adjust_channels:
+                self.channel_padding = nn.ConstantPad1d((0, dim_out - dim), 0)  # Only pad the last dim (channels)
+
  
     def forward(self, x, mask):
+        if self.if_shortcut:
+            identity = x
+            if self.use_pooling:
+                identity = self.pooling(identity)
+            if self.adjust_channels:
+                # Pad the channels without adding any parameters
+                identity = F.pad(identity, (0, 0, 0, 0, 0, identity.size(1)), "constant", 0)
+
         x = self.conv(x)
         x = self.pool(x)
+
+        if self.if_shortcut:
+            x += identity  # Add shortcut connection
+
         x, fm = self.act(x, mask)
         return x, fm
     
@@ -50,9 +77,9 @@ class Block_poly(nn.Module):
         return self.act.get_relu_density(mask)
     
 
-class VanillaNet_poly(nn.Module):
+class VanillaNet_deploy_poly(nn.Module):
     def __init__(self, poly_weight_inits, poly_weight_factors, in_chans=3, num_classes=1000, dims=[96, 192, 384, 768], 
-                 drop_rate=0, act_num=3, strides=[2,2,2,1]):
+                 drop_rate=0, act_num=3, strides=[2,2,2,1], if_shortcut=True, keep_bn=False):
         super().__init__()
         stride, padding = 4, 0
         self.stem = nn.Sequential(
@@ -61,7 +88,7 @@ class VanillaNet_poly(nn.Module):
         )
         self.stages = nn.ModuleList()
         for i in range(len(strides)):
-            stage = Block_poly(dims[i], dims[i+1], poly_weight_inits, poly_weight_factors, act_num=act_num, stride=strides[i])
+            stage = Block_deploy_poly(dims[i], dims[i+1], poly_weight_inits, poly_weight_factors, act_num=act_num, stride=strides[i], if_shortcut=if_shortcut, keep_bn=keep_bn)
             self.stages.append(stage)
         self.cls = nn.Sequential(
             nn.AdaptiveAvgPool2d((1,1)),
@@ -107,11 +134,11 @@ class VanillaNet_poly(nn.Module):
         return total_elements, relu_elements
 
 
-def vanillanet_5_poly(poly_weight_inits, poly_weight_factors):
-    model = VanillaNet_poly(poly_weight_inits, poly_weight_factors, dims=[128*4, 256*4, 512*4, 1024*4], strides=[2,2,2])
+def vanillanet_5_deploy_poly(poly_weight_inits, poly_weight_factors, if_shortcut, keep_bn):
+    model = VanillaNet_deploy_poly(poly_weight_inits, poly_weight_factors, dims=[128*4, 256*4, 512*4, 1024*4], strides=[2,2,2], if_shortcut=if_shortcut, keep_bn=keep_bn)
     return model
 
-def vanillanet_6_poly(poly_weight_inits, poly_weight_factors):
-    model = VanillaNet_poly(poly_weight_inits, poly_weight_factors, dims=[128*4, 256*4, 512*4, 1024*4, 1024*4], strides=[2,2,2,1])
+def vanillanet_6_deploy_poly(poly_weight_inits, poly_weight_factors, if_shortcut, keep_bn):
+    model = VanillaNet_deploy_poly(poly_weight_inits, poly_weight_factors, dims=[128*4, 256*4, 512*4, 1024*4, 1024*4], strides=[2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn)
     return model
 
