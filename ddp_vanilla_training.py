@@ -12,6 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 from timm.data import Mixup
 from timm.utils import ModelEma
 from vanillanet_deploy_poly import VanillaNet_deploy_poly
+from typing import Tuple
 
 def set_forward_with_fms(model, if_forward_with_fms):
     if isinstance(model, DistributedDataParallel):
@@ -23,7 +24,7 @@ def set_forward_with_fms(model, if_forward_with_fms):
 
 
 def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Module, model_t: torch.nn.Module, optimizer: torch.optim.Optimizer, 
-              epoch: int, mask: float, writer: SummaryWriter, pn: int, omit_fms: int, mixup_fn: Mixup, criterion_ce: torch.nn.Module, 
+              epoch: int, mask: Tuple[float, float], writer: SummaryWriter, pn: int, omit_fms: int, mixup_fn: Mixup, criterion_ce: torch.nn.Module, 
               max_norm: float, update_freq: int, model_ema: List[ModelEma], act_learn: float):
     # model_s.eval()
 
@@ -42,7 +43,7 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
             desc = f"{epoch} Lr{optimizer.param_groups[0]['lr']:.2e} act{act_learn:.2f}"
         else:
             desc = f"{epoch} Lr{optimizer.param_groups[0]['lr']:.2e}"
-        pbar = tqdm(trainloader, total=len(trainloader), desc=desc, ncols=125)
+        pbar = tqdm(trainloader, total=len(trainloader), desc=desc, ncols=140)
     else:
         pbar = trainloader
 
@@ -65,6 +66,13 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
 
     total_batches = len(pbar)
     effective_batches = total_batches - total_batches % update_freq
+    effective_num = effective_batches // update_freq
+    assert effective_num == 1281167 // args.effective_batch_size
+
+    if mask is not None:
+        mask_iter = (mask[1] - mask[0]) / effective_num
+        mask_current = mask[0] + mask_iter
+
     accumulated_batches = 0
 
     scaler = torch.cuda.amp.GradScaler(enabled=args.use_amp)
@@ -85,7 +93,12 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
         if mixup_fn is not None:
             x, y = mixup_fn(x, y)
         
-        with torch.cuda.amp.autocast(enabled=args.use_amp):
+        if args.bf16:
+            amp_dtype = torch.bfloat16
+        else:
+            amp_dtype = torch.float16
+
+        with torch.cuda.amp.autocast(enabled=args.use_amp, dtype=amp_dtype):
             if model_t is not None and (args.loss_fm_factor > 0 or args.loss_kd_factor > 0):
                 with torch.no_grad():
                     set_forward_with_fms(model_t, True)
@@ -93,11 +106,11 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
 
             if args.loss_fm_factor > 0:
                 set_forward_with_fms(model_s, True)
-                out_s, fms_s = model_s((x, mask))
+                out_s, fms_s = model_s((x, mask_current))
             else:
                 set_forward_with_fms(model_s, False)
                 if mask is not None:
-                    out_s = model_s((x, mask))
+                    out_s = model_s((x, mask_current))
                 else:
                     out_s = model_s(x)
         
@@ -122,20 +135,6 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
         scaler.scale(loss).backward(create_graph=hasattr(optimizer, 'is_second_order') and optimizer.is_second_order)
         accumulated_batches += 1
         train_loss += loss.item()
-
-        if accumulated_batches == update_freq:
-            scaler.step(optimizer) 
-            scaler.update() 
-            optimizer.zero_grad() 
-            accumulated_batches = 0 
-            if model_ema is not None:
-                for iter_model_ema in model_ema:
-                    iter_model_ema.update(model_s)
-                    for i in range(len(iter_model_ema.ema.stages)):
-                        if hasattr(iter_model_ema.ema.stages[i], 'act_learn'):
-                            iter_model_ema.ema.stages[i].act_learn = model_s.module.stages[i].act_learn
-                        if hasattr(iter_model_ema.ema, 'act_learn'):
-                            iter_model_ema.ema.act_learn = model_s.module.act_learn
                         
         top1_num = (out_s.argmax(dim=1) == y.argmax(dim=1)).float().sum().item()
         top1_total += top1_num
@@ -154,8 +153,24 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
         if args.pbar and pn == 0:
             # print(total, top1_total, top5_total)
             # print(reduced_total, reduced_top1_total, reduced_top5_total)
-            pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e}, 1a {100*reduced_top1_total/reduced_total:.1f}, 5a --")
+            pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e}, 1a {100*reduced_top1_total/reduced_total:.1f}, 5a -, m{mask_current:.4f}")
 
+        if accumulated_batches == update_freq:
+            mask_current += mask_iter
+            scaler.step(optimizer) 
+            scaler.update() 
+            optimizer.zero_grad() 
+            accumulated_batches = 0 
+            if model_ema is not None:
+                for iter_model_ema in model_ema:
+                    iter_model_ema.update(model_s)
+                    for i in range(len(iter_model_ema.ema.stages)):
+                        if hasattr(iter_model_ema.ema.stages[i], 'act_learn'):
+                            iter_model_ema.ema.stages[i].act_learn = model_s.module.stages[i].act_learn
+                        if hasattr(iter_model_ema.ema, 'act_learn'):
+                            iter_model_ema.ema.act_learn = model_s.module.act_learn
+
+    assert mask_current == mask[1]
 
     train_acc = (reduced_top1_total / reduced_total).item()
 

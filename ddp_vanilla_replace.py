@@ -4,7 +4,6 @@ import torch.optim as optim
 import argparse
 from torch.utils.tensorboard import SummaryWriter
 import ast
-from model import ResNet18Poly, general_relu_poly, convert_to_bf16_except_bn, find_submodule, copy_parameters
 import numpy as np
 import re
 from ddp_vanilla_training import ddp_vanilla_train, ddp_test, single_test
@@ -152,11 +151,8 @@ def process(pn, args):
             )
         print("Using EMA with decay = %s" % args.model_ema_decay)
 
+    model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = DistributedDataParallel(model, device_ids=[pn])
-
-    # if args.bf16:
-    #     model = convert_to_bf16_except_bn(model)
-    #     model_relu = convert_to_bf16_except_bn(model_relu)
 
     assigner = None
 
@@ -241,7 +237,8 @@ def process(pn, args):
         else:
             _test_epoch = start_epoch - 1
 
-        _mask = mask_provider.get_mask(0)
+        _mask_begin, _mask_end = mask_provider.get_mask(0)
+
         # if pn == 0:            
         #     total_elements, relu_elements = model.module.get_relu_density(_mask)    
         #     print(f"total_elements {total_elements}, relu_elements {relu_elements}, relu density = {relu_elements/total_elements}")
@@ -290,9 +287,9 @@ def process(pn, args):
         if pn == 0:
             if mask is not None:
                 print("mask = ", mask)
-                writer.add_scalar('Mask value', mask, epoch)
+                writer.add_scalar('mask_end value', mask[1], epoch)
             if isinstance(model.module, VanillaNet_deploy_poly) and args.pixel_wise:
-                total_elements, relu_elements = model.module.get_relu_density(mask)
+                total_elements, relu_elements = model.module.get_relu_density(mask[1])
                 print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
         
         omit_fms = 0
@@ -397,7 +394,6 @@ if __name__ == "__main__":
     parser.add_argument('--drop_rate', type=float, default=0, metavar='PCT', help='Drop rate (default: 0.0)')
     parser.add_argument('--deploy', type=ast.literal_eval, default=False)
 
-
     # training params
     parser.add_argument('--total_epochs', default=300, type=int)
     parser.add_argument('--lr', default=5e-3, type=float, help='learning rate')
@@ -435,7 +431,8 @@ if __name__ == "__main__":
     parser.add_argument('--lr_step_size', type=int, default=0, help="decrease lr every step-size epochs")
     parser.add_argument('--lr_gamma', type=float, default=0.1, help="decrease lr by a factor of lr-gamma")
 
-    # parser.add_argument('--bf16', type=ast.literal_eval, default=False, help='if enable training with bf16 precision')
+    parser.add_argument('--bf16', type=ast.literal_eval, default=False, help='if enable training with bf16 precision')
+
     # parser.add_argument('--fp16', type=ast.literal_eval, default=False, help='if enable training with float16 precision')
     
     
@@ -489,6 +486,8 @@ if __name__ == "__main__":
                         setattr(args, key, value)
 
     args.total_gpus = torch.cuda.device_count()
+
+    args.effective_batch_size = args.batch_size_train * args.total_gpus * args.update_freq
 
     mp.spawn(process, nprocs=args.total_gpus, args=(args, ))
     

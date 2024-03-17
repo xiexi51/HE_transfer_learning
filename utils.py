@@ -143,21 +143,21 @@ class MaskProvider:
     def __init__(self, decrease_type, mask_epochs):
         self.mask_epochs = mask_epochs
         if decrease_type == "1-sinx":
-            mask_x = np.linspace(0, np.pi / 2, mask_epochs+1)[1:]
+            mask_x = np.linspace(0, np.pi / 2, mask_epochs + 1)
             self.mask_y = 1 - np.sin(mask_x)
         elif decrease_type == "e^(-x/10)":
-            mask_x = np.linspace(0, 80, mask_epochs+1)[1:]
+            mask_x = np.linspace(0, 80, mask_epochs + 1)
             self.mask_y = np.exp(-mask_x / 10)
         elif decrease_type == "linear": 
-            self.mask_y = np.linspace(1, 0, mask_epochs+1)[1:]
+            self.mask_y = np.linspace(1, 0, mask_epochs + 1)
         else:
-            self.mask_y = np.zeros(mask_epochs)
+            self.mask_y = np.zeros(mask_epochs + 1)
 
     def get_mask(self, epoch):
-        if epoch <= self.mask_epochs - 1:
-            return self.mask_y[epoch]
+        if epoch < self.mask_epochs:
+            return (self.mask_y[epoch], self.mask_y[epoch + 1])
         else:
-            return 0
+            return (0, 0)
         
 
 def fp16_compress_hook(
