@@ -32,9 +32,12 @@ def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
         param_group['lr'] = lr
 
 def process(pn, args):
+    world_pn = pn + args.node_rank_begin
     change_print_for_distributed(pn == 0)
     torch.cuda.set_device(pn)
-    process_group = torch.distributed.init_process_group(backend="nccl", init_method='env://', world_size=args.total_gpus, rank=pn)
+    process_group = torch.distributed.init_process_group(backend="nccl", 
+                                                         init_method=f'tcp://{args.master_ip}:{args.master_port}', 
+                                                         world_size=args.world_size, rank=world_pn)
 
     torch.manual_seed(10)
     torch.cuda.manual_seed_all(10)
@@ -46,10 +49,10 @@ def process(pn, args):
     print("gpu count =", torch.cuda.device_count())
     
     trainset = build_imagenet_dataset(True, args)
-    train_sampler = DistributedSampler(trainset, num_replicas=args.total_gpus, rank=pn)
+    train_sampler = DistributedSampler(trainset, num_replicas=args.world_size, rank=world_pn)
     trainloader = torch.utils.data.DataLoader(trainset, sampler=train_sampler, batch_size=args.batch_size_train, num_workers=args.num_train_loader_workers, pin_memory=True, shuffle=False, drop_last=True)
     testset = build_imagenet_dataset(False, args) 
-    test_sampler = DistributedSampler(testset, num_replicas=args.total_gpus, rank=pn)
+    test_sampler = DistributedSampler(testset, num_replicas=args.world_size, rank=world_pn)
     single_test_sampler = torch.utils.data.SequentialSampler(testset)
     testloader = torch.utils.data.DataLoader(testset, sampler=test_sampler, batch_size=args.batch_size_test, num_workers=args.num_test_loader_workers, pin_memory=True, shuffle=False, drop_last=False)
     single_testloader = torch.utils.data.DataLoader(testset, sampler=single_test_sampler, batch_size=args.batch_size_test, num_workers=args.num_test_loader_workers, drop_last=False)
@@ -344,7 +347,6 @@ def process(pn, args):
                     os.remove(oldest_checkpoint)
 
         dist.barrier()
-            
 
     if writer is not None:
         writer.close()
@@ -362,7 +364,12 @@ if __name__ == "__main__":
     parser.add_argument('--pbar', type=ast.literal_eval, default=True)
     parser.add_argument('--log_root', type=str)
 
+    parser.add_argument("--master_ip", type=str, default="127.0.0.1")
     parser.add_argument("--master_port", type=int, default=None)
+
+    parser.add_argument("--world_size", type=int, default=0, help='0 or None for single node')
+
+    parser.add_argument("--node_rank_begin", type=int, default=0)
 
     parser.add_argument('--switch_to_deploy', type=ast.literal_eval, default=False)
 
@@ -421,6 +428,8 @@ if __name__ == "__main__":
     parser.add_argument('--poly_weight_factors', nargs=3, type=float, default=[0.03, 0.5, 0.1], help='adjust the learning rate of the three weights in relu_poly')
     parser.add_argument('--mask_decrease', type=str, default='1-sinx', choices = ['0', '1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
     parser.add_argument('--mask_epochs', default=6, type=int, help='the epoch that the relu replacing mask will decrease to 0')
+    parser.add_argument('--mask_mini_batch', type=ast.literal_eval, default=True, help='if enable mini batch mask decrease')
+
     parser.add_argument('--loss_fm_type', type=str, default='at', choices = ['at', 'mse', 'custom_mse'], help='the type for the feature map loss')
     parser.add_argument('--loss_fm_factor', default=100, type=float, help='the factor of the feature map loss, set to 0 to disable')
     parser.add_argument('--loss_ce_factor', default=1, type=float, help='the factor of the cross-entropy loss, set to 0 to disable')
@@ -485,9 +494,13 @@ if __name__ == "__main__":
                         and not key == 'keep_checkpoints'):
                         setattr(args, key, value)
 
-    args.total_gpus = torch.cuda.device_count()
+    args.node_gpu_count = torch.cuda.device_count()
 
-    args.effective_batch_size = args.batch_size_train * args.total_gpus * args.update_freq
+    if args.world_size is None or args.world_size == 0:
+        args.world_size = args.node_gpu_count
+    
+    args.effective_batch_size = args.batch_size_train * args.world_size * args.update_freq
+    print(f"world size = {args.world_size}, effective batch size = {args.effective_batch_size}")
 
     if args.use_amp:
         if args.bf16:
@@ -497,5 +510,5 @@ if __name__ == "__main__":
     else:
         print("use full precision")
 
-    mp.spawn(process, nprocs=args.total_gpus, args=(args, ))
+    mp.spawn(process, nprocs=args.node_gpu_count, args=(args, ))
     

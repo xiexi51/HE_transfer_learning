@@ -67,11 +67,15 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
     total_batches = len(pbar)
     effective_batches = total_batches - total_batches % update_freq
     effective_num = effective_batches // update_freq
-    assert effective_num == 1281167 // args.effective_batch_size
+    # assert effective_num == 1281167 // args.effective_batch_size
 
     if mask is not None:
-        mask_iter = (mask[1] - mask[0]) / effective_num
-        mask_current = mask[0] + mask_iter
+        if args.mask_mini_batch:
+            mask_iter = (mask[1] - mask[0]) / effective_num
+            mask_current = mask[0] + mask_iter
+        else:
+            mask_iter = 0
+            mask_current = mask[1]
 
     accumulated_batches = 0
 
@@ -144,8 +148,11 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
         reduced_total = torch.tensor(total, dtype=torch.float).cuda().detach()
         reduced_top1_total = torch.tensor(top1_total, dtype=torch.float).cuda().detach()
         
-        dist.reduce(reduced_total, dst=0)
-        dist.reduce(reduced_top1_total, dst=0)
+        # dist.reduce(reduced_total, dst=0)
+        # dist.reduce(reduced_top1_total, dst=0)
+
+        dist.all_reduce(reduced_total)
+        dist.all_reduce(reduced_top1_total)
 
         reduced_total = reduced_total.cpu().numpy()
         reduced_top1_total = reduced_top1_total.cpu().numpy()
@@ -218,9 +225,14 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn):
         reduced_total = torch.tensor(total, dtype=torch.float).cuda().detach()
         reduced_top1_total = top1_total.clone().detach()
         reduced_top5_total = top5_total.clone().detach()
-        dist.reduce(reduced_total, dst=0)
-        dist.reduce(reduced_top1_total, dst=0)
-        dist.reduce(reduced_top5_total, dst=0)
+        
+        # dist.reduce(reduced_total, dst=0)
+        # dist.reduce(reduced_top1_total, dst=0)
+        # dist.reduce(reduced_top5_total, dst=0)
+
+        dist.all_reduce(reduced_total)
+        dist.all_reduce(reduced_top1_total)
+        dist.all_reduce(reduced_top5_total)
 
         reduced_total = reduced_total.cpu().numpy()
         reduced_top1_total = reduced_top1_total.cpu().numpy()
