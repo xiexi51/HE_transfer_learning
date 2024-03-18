@@ -10,5 +10,5 @@ pip install timm
 
 Before python `scp_files.py`, run this command from azure for passwordless access:
 ```bash
-ssh-copy-id -o ProxyJump=hop20001@137.99.0.102 xix22010@192.168.10.16
+ssh-copy-id -o ProxyJump=xix22010@137.99.0.102 xix22010@192.168.10.16
 ```
