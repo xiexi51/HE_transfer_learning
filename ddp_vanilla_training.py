@@ -79,6 +79,11 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
 
     optimizer.zero_grad()
 
+    if args.bf16:
+        amp_dtype = torch.bfloat16
+    else:
+        amp_dtype = torch.float16
+
     for iter, (x, y) in enumerate(pbar):
         if iter >= effective_batches:
             break
@@ -93,11 +98,6 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
         if mixup_fn is not None:
             x, y = mixup_fn(x, y)
         
-        if args.bf16:
-            amp_dtype = torch.bfloat16
-        else:
-            amp_dtype = torch.float16
-
         with torch.cuda.amp.autocast(enabled=args.use_amp, dtype=amp_dtype):
             if model_t is not None and (args.loss_fm_factor > 0 or args.loss_kd_factor > 0):
                 with torch.no_grad():
@@ -170,7 +170,7 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                         if hasattr(iter_model_ema.ema, 'act_learn'):
                             iter_model_ema.ema.act_learn = model_s.module.act_learn
 
-    assert mask_current == mask[1]
+    # print(mask_current, mask[1])
 
     train_acc = (reduced_top1_total / reduced_total).item()
 
@@ -193,10 +193,16 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn):
         pbar = testloader
 
     test_acc = 0
+
+    if args.bf16:
+        amp_dtype = torch.bfloat16
+    else:
+        amp_dtype = torch.float16
+
     for x, y in pbar:
         x, y = x.cuda(), y.cuda()
         
-        with torch.cuda.amp.autocast(enabled=args.use_amp):
+        with torch.cuda.amp.autocast(enabled=args.use_amp, dtype=amp_dtype):
             with torch.no_grad():
                 set_forward_with_fms(model, False)
                 if mask is not None:

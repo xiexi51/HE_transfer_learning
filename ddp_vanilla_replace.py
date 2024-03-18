@@ -297,8 +297,8 @@ def process(pn, args):
                                       mask=mask, writer=writer, pn=pn, omit_fms=omit_fms, mixup_fn=mixup_fn, criterion_ce=criterion_ce, 
                                       max_norm=None, update_freq=args.update_freq, model_ema=None, act_learn=act_learn)
 
-        if True or mask < 0.01:
-            test_acc = ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn)
+        if True or mask[1] < 0.01:
+            test_acc = ddp_test(args, testloader, model, epoch, best_acc, mask[1], writer, pn)
 
         if pn == 0:
             with open(f"{log_dir}/acc.txt", 'a') as file:
@@ -488,6 +488,14 @@ if __name__ == "__main__":
     args.total_gpus = torch.cuda.device_count()
 
     args.effective_batch_size = args.batch_size_train * args.total_gpus * args.update_freq
+
+    if args.use_amp:
+        if args.bf16:
+            print("use bf16")
+        else:
+            print("use fp16")
+    else:
+        print("use full precision")
 
     mp.spawn(process, nprocs=args.total_gpus, args=(args, ))
     
