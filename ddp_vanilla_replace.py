@@ -365,7 +365,7 @@ if __name__ == "__main__":
     parser.add_argument('--log_root', type=str)
 
     parser.add_argument("--master_ip", type=str, default="127.0.0.1")
-    parser.add_argument("--master_port", type=int, default=None)
+    parser.add_argument("--master_port", type=int, default=6105)
 
     parser.add_argument("--world_size", type=int, default=0, help='0 or None for single node')
 
@@ -462,13 +462,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     os.environ['NCCL_DEBUG'] = 'ERROR'
-    os.environ['MASTER_ADDR'] = 'localhost'
-    if args.master_port is None:
-        os.environ['MASTER_PORT'] = '9501'
-    else:
-        os.environ['MASTER_PORT'] = str(args.master_port)
-
-    print("master port = " + os.environ['MASTER_PORT'])
 
     if args.keep_checkpoints == -1:
         print("keep all checkpoints")
