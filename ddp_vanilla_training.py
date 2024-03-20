@@ -24,7 +24,7 @@ def set_forward_with_fms(model, if_forward_with_fms):
 
 
 def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Module, model_t: torch.nn.Module, optimizer: torch.optim.Optimizer, 
-              epoch: int, mask: Tuple[float, float], writer: SummaryWriter, pn: int, omit_fms: int, mixup_fn: Mixup, criterion_ce: torch.nn.Module, 
+              epoch: int, mask: Tuple[float, float], writer: SummaryWriter, world_pn: int, omit_fms: int, mixup_fn: Mixup, criterion_ce: torch.nn.Module, 
               max_norm: float, update_freq: int, model_ema: List[ModelEma], act_learn: float):
     # model_s.eval()
 
@@ -38,7 +38,7 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
     train_loss_ce = 0
     train_loss_fm = 0
 
-    if args.pbar and pn == 0:
+    if args.pbar and world_pn == 0:
         if act_learn is not None:
             desc = f"{epoch} Lr{optimizer.param_groups[0]['lr']:.2e} act{act_learn:.2f}"
         else:
@@ -92,8 +92,6 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
         if iter >= effective_batches:
             break
 
-        # print(pn, x[0,0,0,0].numpy())
-        # break
         x, y = x.cuda(), y.cuda()
 
         # if args.bf16:
@@ -157,7 +155,7 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
         reduced_total = reduced_total.cpu().numpy()
         reduced_top1_total = reduced_top1_total.cpu().numpy()
         
-        if args.pbar and pn == 0:
+        if args.pbar and world_pn == 0:
             # print(total, top1_total, top5_total)
             # print(reduced_total, reduced_top1_total, reduced_top5_total)
             pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e}, 1a {100*reduced_top1_total/reduced_total:.1f}, 5a -, m{mask_current:.4f}")
@@ -189,12 +187,12 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
         writer.add_scalar('Loss_ce/train', train_loss_ce/total, epoch)
     return train_acc
         
-def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn):
+def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, world_pn):
     model.eval()
     top1_total = 0
     top5_total = 0
     total = 0
-    if args.pbar and pn == 0:
+    if args.pbar and world_pn == 0:
         pbar = tqdm(testloader, total=len(testloader), desc=f"Epo {epoch} Testing", ncols=100)
     else:
         pbar = testloader
@@ -239,7 +237,7 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, pn):
         reduced_top5_total = reduced_top5_total.cpu().numpy()
 
         test_acc = reduced_top1_total/reduced_total
-        if args.pbar and pn == 0:
+        if args.pbar and world_pn == 0:
             pbar.set_postfix_str(f"1a {100*reduced_top1_total/reduced_total:.2f}, 5a {100*reduced_top5_total/reduced_total:.2f}, best {100*best_acc:.2f}")
         
         
@@ -290,12 +288,12 @@ def single_test(args, testloader, model, epoch, best_acc, mask):
     return test_acc
 
 
-def ddp_train_transfer(args, trainloader, model_s, optimizer, epoch, mask, writer, pn):
+def ddp_train_transfer(args, trainloader, model_s, optimizer, epoch, mask, writer, world_pn):
     model_s.eval()
 
     train_loss = 0
 
-    if args.pbar and pn == 0:
+    if args.pbar and world_pn == 0:
         pbar = tqdm(trainloader, total=len(trainloader), desc=f"Epo {epoch} Lr {optimizer.param_groups[0]['lr']:.1e}", ncols=125)
     else:
         pbar = trainloader
@@ -311,11 +309,7 @@ def ddp_train_transfer(args, trainloader, model_s, optimizer, epoch, mask, write
     criterion_ce = nn.CrossEntropyLoss()
 
     for x, y in pbar:
-        # print(pn, x[0,0,0,0].numpy())
-        # break
         x, y = x.cuda(), y.cuda()
-        # x = torch.load(f'x{pn}.pt').cuda()
-        # y = torch.load(f'y{pn}.pt').cuda()
 
         optimizer.zero_grad()
         
@@ -350,7 +344,7 @@ def ddp_train_transfer(args, trainloader, model_s, optimizer, epoch, mask, write
         reduced_top1_total = reduced_top1_total.cpu().numpy()
         reduced_top5_total = reduced_top5_total.cpu().numpy()
         
-        if args.pbar and pn == 0:
+        if args.pbar and world_pn == 0:
             pbar.set_postfix_str(f"L{train_loss/total:.2e}, ce{train_loss/total:.2e}, 1a {100*reduced_top1_total/reduced_total:.1f}, 5a {100*reduced_top5_total/reduced_total:.1f}")
 
     train_acc = (reduced_top1_total / reduced_total).item()

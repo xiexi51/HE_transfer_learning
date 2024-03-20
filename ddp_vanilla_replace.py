@@ -33,7 +33,7 @@ def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
 
 def process(pn, args):
     world_pn = pn + args.node_rank_begin
-    change_print_for_distributed(pn == 0)
+    change_print_for_distributed(world_pn == 0)
     torch.cuda.set_device(pn)
     process_group = torch.distributed.init_process_group(backend="nccl", 
                                                          init_method=f'tcp://{args.master_ip}:{args.master_port}', 
@@ -203,7 +203,7 @@ def process(pn, args):
 
     log_dir = log_root
     
-    if pn == 0:
+    if world_pn == 0:
         print("log_dir = ", log_dir)
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
@@ -221,11 +221,6 @@ def process(pn, args):
     values_list = [str(value) for key, value in vars(args).items()]
     print_prefix = ' '.join(values_list)
 
-    # if pn == 0:
-    #     print(start_epoch)
-    #     for arg, value in vars(args).items():
-    #         print(f"{arg}: {value}")
-
     test_acc = 0
     best_acc = 0
 
@@ -242,7 +237,7 @@ def process(pn, args):
 
         _mask_begin, _mask_end = mask_provider.get_mask(0)
 
-        # if pn == 0:            
+        # if world_pn == 0:            
         #     total_elements, relu_elements = model.module.get_relu_density(_mask)    
         #     print(f"total_elements {total_elements}, relu_elements {relu_elements}, relu density = {relu_elements/total_elements}")
         
@@ -287,7 +282,7 @@ def process(pn, args):
 
         # mask = 1
 
-        if pn == 0:
+        if world_pn == 0:
             if mask is not None:
                 print("mask = ", mask)
                 writer.add_scalar('mask_end value', mask[1], epoch)
@@ -297,20 +292,20 @@ def process(pn, args):
         
         omit_fms = 0
         train_acc = ddp_vanilla_train(args=args, trainloader=trainloader, model_s=model, model_t=model_t, optimizer=optimizer, epoch=epoch, 
-                                      mask=mask, writer=writer, pn=pn, omit_fms=omit_fms, mixup_fn=mixup_fn, criterion_ce=criterion_ce, 
+                                      mask=mask, writer=writer, world_pn=world_pn, omit_fms=omit_fms, mixup_fn=mixup_fn, criterion_ce=criterion_ce, 
                                       max_norm=None, update_freq=args.update_freq, model_ema=None, act_learn=act_learn)
 
         if True or mask[1] < 0.01:
-            test_acc = ddp_test(args, testloader, model, epoch, best_acc, mask[1], writer, pn)
+            test_acc = ddp_test(args, testloader, model, epoch, best_acc, mask[1], writer, world_pn)
 
-        if pn == 0:
+        if world_pn == 0:
             with open(f"{log_dir}/acc.txt", 'a') as file:
                 file.write(f"{epoch} train {train_acc*100:.2f} test {test_acc*100:.2f} best {best_acc*100:.2f} Lr {optimizer.param_groups[0]['lr']:.2e} act_learn {act_learn:.2f}\n")
 
         if lr_scheduler is not None:
             lr_scheduler.step()
         
-        if pn == 0:
+        if world_pn == 0:
             if isinstance(model, torch.nn.parallel.DistributedDataParallel):
                 model_state_dict = model.module.state_dict()
             else:
