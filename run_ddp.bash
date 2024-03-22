@@ -22,6 +22,7 @@ proj_root="/home/aiscuser/HE_transfer_learning"
 # Run on the master node
 echo "Running on master node (IP: $master_ip)..."
 cd $proj_root
+echo "python $python_script $args --master_ip $master_ip --world_size $world_size --node_rank_begin ${node_rank_begin[0]}"
 python $python_script $args --master_ip $master_ip --world_size $world_size --node_rank_begin ${node_rank_begin[0]}
 
 # Run on each slave node
