@@ -5,14 +5,16 @@ python_script="$1"
 shift  # Remove the first argument, the rest are arguments for the Python script
 args="$@"
 
+# Read IPs from ip_list file
+ips=($(cat ip_list))  # Assuming ip_list is in the same directory as the script
+
 # Define node information
-master_ip="10.9.32.40"
-slave_ips=("10.9.32.236")  # Additional slave node IPs can be added here
-node_rank_begin=(0 8)  # Starting node rank for each node
+master_ip="${ips[0]}"  # First IP is the master
+slave_ips=("${ips[@]:1}")  # Remaining IPs are slaves
+node_rank_begin=($(seq 0 8 $(((${#ips[@]} - 1) * 8))))  # Generate node rank begin array
 
 # Calculate world size
-num_nodes=$((${#slave_ips[@]} + 1))  # Add 1 to include the master node
-world_size=$(($num_nodes * 8))
+world_size=$((${#ips[@]} * 8))
 
 # Define project root directory
 proj_root="/home/aiscuser/HE_transfer_learning"
