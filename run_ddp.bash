@@ -22,13 +22,18 @@ proj_root="/home/aiscuser/HE_transfer_learning"
 # Run on the master node
 echo "Running on master node (IP: $master_ip)..."
 cd $proj_root
-echo "python $python_script $args --master_ip $master_ip --world_size $world_size --node_rank_begin ${node_rank_begin[0]}"
-python $python_script $args --master_ip $master_ip --world_size $world_size --node_rank_begin ${node_rank_begin[0]}
+master_command="python $python_script $args --master_ip $master_ip --world_size $world_size --node_rank_begin ${node_rank_begin[0]}"
+echo $master_command  # Echo the command for the master node
+$master_command &  # Execute the Python command in the background
 
 # Run on each slave node
 for i in "${!slave_ips[@]}"; do
   ip=${slave_ips[$i]}
   rank_begin=${node_rank_begin[$(($i + 1))]}  # $i+1 because the master node is already 0
   echo "Running on slave node $((i+1)) (IP: $ip)..."
-  ssh aiscuser@$ip "cd $proj_root; python $python_script $args --master_ip $master_ip --world_size $world_size --node_rank_begin $rank_begin"
+  slave_command="cd $proj_root; python $python_script $args --master_ip $master_ip --world_size $world_size --node_rank_begin $rank_begin"
+  ssh aiscuser@$ip "$slave_command &"  # Execute the Python command in the background on the slave node
 done
+
+# Optionally, wait for all background processes to finish
+wait
