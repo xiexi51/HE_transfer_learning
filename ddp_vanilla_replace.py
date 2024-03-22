@@ -24,12 +24,29 @@ from optim_factory import create_optimizer
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy, BinaryCrossEntropy
 import math
 from locals import proj_root
+import subprocess
+import glob
 
 
 def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
     lr = init_lr * (lr_gamma ** (epoch // lr_step_size))
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
+
+def copy_to_a6000(source, destination):
+    scp_cmd = f"scp -o ProxyJump=xix22010@137.99.0.102 {source} xix22010@192.168.10.16:{destination}"
+    try:
+        subprocess.run(scp_cmd, shell=True, check=True)
+        # print(f"File {source} successfully copied to {destination}")
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to copy {source} to {destination}. Error: {e}")
+
+def copy_tensorboard_logs(log_dir, a6000_log_dir):
+    tb_files = glob.glob(os.path.join(log_dir, 'events.out.tfevents.*'))
+    for tb_file in tb_files:
+        destination = os.path.join(a6000_log_dir, os.path.basename(tb_file))
+        copy_to_a6000(tb_file, destination)
+
 
 def process(pn, args):
     world_pn = pn + args.node_rank_begin
@@ -204,6 +221,8 @@ def process(pn, args):
     log_dir = log_root
 
     a6000_store_root = "/home/xix22010/py_projects/from_azure"
+
+    a6000_log_dir = os.path.join(a6000_store_root, log_dir)
     
     if world_pn == 0:
         print("log_dir = ", log_dir)
@@ -217,8 +236,15 @@ def process(pn, args):
         print(f"Arguments saved in {args_file}")
 
         writer = SummaryWriter(log_dir=log_dir)
+
+        create_dir_cmd = f"ssh xix22010@192.168.10.16 'mkdir -p {a6000_log_dir}'"
+        subprocess.run(create_dir_cmd, shell=True, check=True)
+        copy_to_a6000(args_file, os.path.join(a6000_log_dir, "args.txt"))
+
     else:
         writer = None
+    
+    dist.barrier()
 
     values_list = [str(value) for key, value in vars(args).items()]
     print_prefix = ' '.join(values_list)
@@ -303,11 +329,13 @@ def process(pn, args):
         if world_pn == 0:
             with open(f"{log_dir}/acc.txt", 'a') as file:
                 file.write(f"{epoch} train {train_acc*100:.2f} test {test_acc*100:.2f} best {best_acc*100:.2f} Lr {optimizer.param_groups[0]['lr']:.2e} act_learn {act_learn:.2f}\n")
+            copy_to_a6000(os.path.join(log_dir, "acc.txt"), a6000_log_dir)
 
         if lr_scheduler is not None:
             lr_scheduler.step()
         
         if world_pn == 0:
+            copy_tensorboard_logs(log_dir, a6000_log_dir)
             if isinstance(model, torch.nn.parallel.DistributedDataParallel):
                 model_state_dict = model.module.state_dict()
             else:
