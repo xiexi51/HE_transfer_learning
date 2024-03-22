@@ -202,6 +202,8 @@ def process(pn, args):
             log_root = args.resume_dir    
 
     log_dir = log_root
+
+    a6000_store_root = "/home/xix22010/py_projects/from_azure"
     
     if world_pn == 0:
         print("log_dir = ", log_dir)

@@ -6,3 +6,4 @@ locals.py
 /dump*
 *.tar.gz
 tmp*
+ip_list
