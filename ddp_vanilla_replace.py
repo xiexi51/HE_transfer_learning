@@ -27,6 +27,9 @@ from locals import proj_root
 import subprocess
 import glob
 
+cse_gateway_login = "xix22010@137.99.0.102"
+a6000_login = "xix22010@192.168.10.16"
+ssh_options = f"-o ProxyJump={cse_gateway_login} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
 def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
     lr = init_lr * (lr_gamma ** (epoch // lr_step_size))
@@ -34,7 +37,7 @@ def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
         param_group['lr'] = lr
 
 def copy_to_a6000(source, destination):
-    scp_cmd = f"scp -o ProxyJump=xix22010@137.99.0.102 {source} xix22010@192.168.10.16:{destination}"
+    scp_cmd = f"scp {ssh_options} {source} {a6000_login}:{destination}"
     try:
         subprocess.run(scp_cmd, shell=True, check=True)
         # print(f"File {source} successfully copied to {destination}")
@@ -237,9 +240,17 @@ def process(pn, args):
 
         writer = SummaryWriter(log_dir=log_dir)
 
-        create_dir_cmd = f"ssh -o ProxyJump=xix22010@137.99.0.102 xix22010@192.168.10.16 'mkdir -p {a6000_log_dir}'"
+        create_dir_cmd = f"ssh {ssh_options} {a6000_login} 'mkdir -p {a6000_log_dir}'"
         subprocess.run(create_dir_cmd, shell=True, check=True)
         copy_to_a6000(args_file, os.path.join(a6000_log_dir, "args.txt"))
+        
+        try:
+            subprocess.run(f"ssh {ssh_options} {a6000_login} 'mkdir -p {a6000_log_dir}/src'", shell=True, check=True)
+            print(f"Directory {a6000_log_dir}/src successfully created.")
+            subprocess.run(f"scp {ssh_options} ./*.py {a6000_login}:{a6000_log_dir}/src/", shell=True, check=True)
+            print(f"All .py files from ./ successfully copied to {a6000_log_dir}/src.")
+        except subprocess.CalledProcessError as e:
+            print(f"An error occurred. Error: {e}")
 
     else:
         writer = None
