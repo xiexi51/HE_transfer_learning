@@ -237,7 +237,7 @@ def process(pn, args):
 
         writer = SummaryWriter(log_dir=log_dir)
 
-        create_dir_cmd = f"ssh xix22010@192.168.10.16 'mkdir -p {a6000_log_dir}'"
+        create_dir_cmd = f"ssh -o ProxyJump=xix22010@137.99.0.102 xix22010@192.168.10.16 'mkdir -p {a6000_log_dir}'"
         subprocess.run(create_dir_cmd, shell=True, check=True)
         copy_to_a6000(args_file, os.path.join(a6000_log_dir, "args.txt"))
 
