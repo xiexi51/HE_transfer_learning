@@ -26,6 +26,7 @@ import math
 from locals import proj_root
 import subprocess
 import glob
+import setproctitle
 
 # cmd_silence = ">/dev/null 2>&1"
 cse_gateway_login = "xix22010@137.99.0.102"
@@ -90,8 +91,6 @@ def process(pn, args):
     # model = vanillanet_6_deploy_poly(args.poly_weight_inits, args.poly_weight_factors, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
 
     model = vanillanet_5_deploy_poly(args.poly_weight_inits, args.poly_weight_factors, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
-
-    
         
     # model = vanillanet_5_avg(if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
 
@@ -215,6 +214,7 @@ def process(pn, args):
         log_root = args.log_root
     else:
         log_root = 'runs' + current_datetime
+    
     if args.resume and args.resume_dir:
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         if lr_scheduler is not None:
@@ -224,31 +224,28 @@ def process(pn, args):
             log_root = args.resume_dir    
 
     log_dir = log_root
-
+    print("log_dir = ", log_dir)
+    
     a6000_store_root = "/home/xix22010/py_projects/from_azure"
-
     a6000_log_dir = os.path.join(a6000_store_root, log_dir)
     
-    if world_pn == 0:
-        print("log_dir = ", log_dir)
+    if pn == 0: 
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
-
         args_file = os.path.join(log_dir, "args.txt")
         with open(args_file, 'w') as file:
             for key, value in vars(args).items():
                 file.write(f'{key}: {value}\n')
-        print(f"Arguments saved in {args_file}")
-
+        # print(f"Arguments saved in {args_file}")
         writer = SummaryWriter(log_dir=log_dir)
+    else:
+        writer = None
 
+    if world_pn == 0:
         slience_cmd(f"ssh {ssh_options} {a6000_login} 'mkdir -p {a6000_log_dir}'")
         copy_to_a6000(args_file, os.path.join(a6000_log_dir, "args.txt"))
         slience_cmd(f"ssh {ssh_options} {a6000_login} 'mkdir -p {a6000_log_dir}/src'")
         slience_cmd(f"scp {ssh_options} ./*.py {a6000_login}:{a6000_log_dir}/src/")
-
-    else:
-        writer = None
     
     dist.barrier()
 
@@ -316,7 +313,7 @@ def process(pn, args):
 
         # mask = 1
 
-        if world_pn == 0:
+        if pn == 0:
             if mask is not None:
                 print("mask = ", mask)
                 writer.add_scalar('mask_end value', mask[1], epoch)
@@ -332,16 +329,18 @@ def process(pn, args):
         if True or mask[1] < 0.01:
             test_acc = ddp_test(args, testloader, model, epoch, best_acc, mask[1], writer, world_pn)
 
-        if world_pn == 0:
+        if pn == 0:
             with open(f"{log_dir}/acc.txt", 'a') as file:
                 file.write(f"{epoch} train {train_acc*100:.2f} test {test_acc*100:.2f} best {best_acc*100:.2f} Lr {optimizer.param_groups[0]['lr']:.2e} act_learn {act_learn:.2f}\n")
-            copy_to_a6000(os.path.join(log_dir, "acc.txt"), a6000_log_dir)
-
+        
         if lr_scheduler is not None:
             lr_scheduler.step()
-        
+
         if world_pn == 0:
+            copy_to_a6000(os.path.join(log_dir, "acc.txt"), a6000_log_dir)
             copy_tensorboard_logs(log_dir, a6000_log_dir)
+        
+        if pn == 0: 
             if isinstance(model, torch.nn.parallel.DistributedDataParallel):
                 model_state_dict = model.module.state_dict()
             else:
@@ -383,6 +382,7 @@ def process(pn, args):
         writer.close()
 
 if __name__ == "__main__":
+    setproctitle.setproctitle("python_ddp")
 
     parser = argparse.ArgumentParser(description='Fully poly replacement on ResNet for ImageNet')
 
@@ -494,10 +494,13 @@ if __name__ == "__main__":
 
     os.environ['NCCL_DEBUG'] = 'ERROR'
 
-    if args.keep_checkpoints == -1:
-        print("keep all checkpoints")
-    else:
-        print(f"keep latest {args.keep_checkpoints} checkpoints")
+    print(args.log_root)
+
+    if args.node_rank_begin == 0:
+        if args.keep_checkpoints == -1:
+            print("keep all checkpoints")
+        else:
+            print(f"keep latest {args.keep_checkpoints} checkpoints")
 
     def parse_args_line(line):
         key, value = line.split(": ", 1)
@@ -524,15 +527,16 @@ if __name__ == "__main__":
         args.world_size = args.node_gpu_count
     
     args.effective_batch_size = args.batch_size_train * args.world_size * args.update_freq
-    print(f"world size = {args.world_size}, effective batch size = {args.effective_batch_size}")
-
-    if args.use_amp:
-        if args.bf16:
-            print("use bf16")
+    
+    if args.node_rank_begin == 0:
+        print(f"world size = {args.world_size}, effective batch size = {args.effective_batch_size}")
+        if args.use_amp:
+            if args.bf16:
+                print("use bf16")
+            else:
+                print("use fp16")
         else:
-            print("use fp16")
-    else:
-        print("use full precision")
+            print("use full precision")
 
     mp.spawn(process, nprocs=args.node_gpu_count, args=(args, ))
     
