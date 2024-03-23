@@ -55,6 +55,7 @@ def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
         param_group['lr'] = lr
 
 def process(pn, args):
+    setproctitle.setproctitle("python_ddp")
     world_pn = pn + args.node_rank_begin
     change_print_for_distributed(world_pn == 0)
     torch.cuda.set_device(pn)
@@ -383,7 +384,6 @@ def process(pn, args):
 
 if __name__ == "__main__":
     setproctitle.setproctitle("python_ddp")
-
     parser = argparse.ArgumentParser(description='Fully poly replacement on ResNet for ImageNet')
 
     # general settings
