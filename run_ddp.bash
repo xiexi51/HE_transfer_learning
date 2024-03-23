@@ -31,9 +31,18 @@ for i in "${!slave_ips[@]}"; do
   ip=${slave_ips[$i]}
   rank_begin=${node_rank_begin[$(($i + 1))]}  # $i+1 because the master node is already 0
   echo "Running on slave node $((i+1)) (IP: $ip)..."
-  slave_command="cd $proj_root; python $python_script $args --master_ip $master_ip --world_size $world_size --node_rank_begin $rank_begin"
-  ssh aiscuser@$ip "$slave_command &"  # Execute the Python command in the background on the slave node
+
+  # Prepare commands for updating project directory and copying Python files
+  update_cmd="cd $proj_root; echo 'Pulling latest changes from Git...'; git pull"
+  copy_cmd="echo 'Copying Python files from master...'; scp $master_ip:$proj_root/*.py $proj_root/"
+
+  # Command to run Python script on slave node, executed in the background
+  slave_command="$update_cmd; $copy_cmd; python $python_script $args --master_ip $master_ip --world_size $world_size --node_rank_begin $rank_begin &"
+
+  # Execute the commands on the slave node
+  ssh aiscuser@$ip "$slave_command"  # Execute the commands on the slave node
 done
+
 
 # Optionally, wait for all background processes to finish
 wait

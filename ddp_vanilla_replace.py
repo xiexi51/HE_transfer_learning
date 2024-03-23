@@ -29,12 +29,8 @@ import glob
 
 cse_gateway_login = "xix22010@137.99.0.102"
 a6000_login = "xix22010@192.168.10.16"
-ssh_options = f"-o ProxyJump={cse_gateway_login} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-
-def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
-    lr = init_lr * (lr_gamma ** (epoch // lr_step_size))
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
+# ssh_options = f"-o ProxyJump={cse_gateway_login} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+ssh_options = f"-o ProxyJump={cse_gateway_login} -o StrictHostKeyChecking=no "
 
 def copy_to_a6000(source, destination):
     scp_cmd = f"scp {ssh_options} {source} {a6000_login}:{destination}"
@@ -50,6 +46,10 @@ def copy_tensorboard_logs(log_dir, a6000_log_dir):
         destination = os.path.join(a6000_log_dir, os.path.basename(tb_file))
         copy_to_a6000(tb_file, destination)
 
+def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
+    lr = init_lr * (lr_gamma ** (epoch // lr_step_size))
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
 
 def process(pn, args):
     world_pn = pn + args.node_rank_begin
