@@ -27,18 +27,20 @@ from locals import proj_root
 import subprocess
 import glob
 
+# cmd_silence = ">/dev/null 2>&1"
 cse_gateway_login = "xix22010@137.99.0.102"
 a6000_login = "xix22010@192.168.10.16"
 # ssh_options = f"-o ProxyJump={cse_gateway_login} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 ssh_options = f"-o ProxyJump={cse_gateway_login} -o StrictHostKeyChecking=no "
 
-def copy_to_a6000(source, destination):
-    scp_cmd = f"scp {ssh_options} {source} {a6000_login}:{destination}"
+def slience_cmd(cmd):
     try:
-        subprocess.run(scp_cmd, shell=True, check=True)
-        # print(f"File {source} successfully copied to {destination}")
+        subprocess.run(cmd, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except subprocess.CalledProcessError as e:
-        print(f"Failed to copy {source} to {destination}. Error: {e}")
+        print(f"Error: {e}")
+
+def copy_to_a6000(source, destination):
+    slience_cmd(f"scp {ssh_options} {source} {a6000_login}:{destination}")
 
 def copy_tensorboard_logs(log_dir, a6000_log_dir):
     tb_files = glob.glob(os.path.join(log_dir, 'events.out.tfevents.*'))
@@ -240,17 +242,10 @@ def process(pn, args):
 
         writer = SummaryWriter(log_dir=log_dir)
 
-        create_dir_cmd = f"ssh {ssh_options} {a6000_login} 'mkdir -p {a6000_log_dir}'"
-        subprocess.run(create_dir_cmd, shell=True, check=True)
+        slience_cmd(f"ssh {ssh_options} {a6000_login} 'mkdir -p {a6000_log_dir}'")
         copy_to_a6000(args_file, os.path.join(a6000_log_dir, "args.txt"))
-        
-        try:
-            subprocess.run(f"ssh {ssh_options} {a6000_login} 'mkdir -p {a6000_log_dir}/src'", shell=True, check=True)
-            print(f"Directory {a6000_log_dir}/src successfully created.")
-            subprocess.run(f"scp {ssh_options} ./*.py {a6000_login}:{a6000_log_dir}/src/", shell=True, check=True)
-            print(f"All .py files from ./ successfully copied to {a6000_log_dir}/src.")
-        except subprocess.CalledProcessError as e:
-            print(f"An error occurred. Error: {e}")
+        slience_cmd(f"ssh {ssh_options} {a6000_login} 'mkdir -p {a6000_log_dir}/src'")
+        slience_cmd(f"scp {ssh_options} ./*.py {a6000_login}:{a6000_log_dir}/src/")
 
     else:
         writer = None
