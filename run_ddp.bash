@@ -5,6 +5,22 @@ python_script="$1"
 shift  # Remove the first argument, the rest are arguments for the Python script
 args="$@"
 
+# Default master port
+master_port=6105
+
+# Check if --master_port is in the arguments
+for arg in $args; do
+  if [[ "$arg" == "--master_port" ]]; then
+    custom_port_set=true
+    break
+  fi
+done
+
+# If --master_port was not set, add default master port to arguments
+if [ -z "$custom_port_set" ]; then
+  args="$args --master_port $master_port"
+fi
+
 log_root="runs$(date '+%Y%m%d%H%M%S')"
 
 # Read IPs from ip_list file
@@ -20,6 +36,21 @@ world_size=$((${#ips[@]} * 8))
 
 # Define project root directory
 proj_root="/home/aiscuser/HE_transfer_learning"
+
+# Function to check if port is available
+function is_port_available() {
+  ! nc -z 127.0.0.1 $1
+}
+
+echo "testing master port from $master_port"
+# Find an available master port
+while ! is_port_available $master_port; do
+  master_port=$((master_port+1))
+done
+echo "Master port found: $master_port"
+
+# Update args with the found master port
+args=$(echo $args | sed -E "s/--master_port [0-9]+/--master_port $master_port/")
 
 # Run on the master node
 echo "Running on master node (IP: $master_ip)..."
@@ -44,7 +75,6 @@ for i in "${!slave_ips[@]}"; do
   # Execute the commands on the slave node
   ssh aiscuser@$ip "$slave_command"  # Execute the commands on the slave node
 done
-
 
 # Optionally, wait for all background processes to finish
 wait
