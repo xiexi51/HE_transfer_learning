@@ -39,7 +39,12 @@ proj_root="/home/aiscuser/HE_transfer_learning"
 
 # Function to check if port is available
 function is_port_available() {
-  ! nc -z 127.0.0.1 $1
+    (echo "" >/dev/tcp/localhost/$1) &>/dev/null
+    if [ $? -eq 0 ]; then
+        return 1  # Port is in use, return false
+    else
+        return 0  # Port is not in use, return true
+    fi
 }
 
 echo "testing master port from $master_port"
