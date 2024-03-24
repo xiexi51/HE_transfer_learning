@@ -8,10 +8,15 @@ args="$@"
 # Default master port
 master_port=6105
 
-# Check if --master_port is in the arguments
+# Check if --master_port is in the arguments and update master_port if present
+custom_port_set=false
 for arg in $args; do
   if [[ "$arg" == "--master_port" ]]; then
     custom_port_set=true
+    continue
+  fi
+  if $custom_port_set; then
+    master_port=$arg  # Set the master port to the argument following --master_port
     break
   fi
 done
