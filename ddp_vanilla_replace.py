@@ -28,7 +28,6 @@ import subprocess
 import glob
 import setproctitle
 
-# cmd_silence = ">/dev/null 2>&1"
 cse_gateway_login = "xix22010@137.99.0.102"
 a6000_login = "xix22010@192.168.10.16"
 # ssh_options = f"-o ProxyJump={cse_gateway_login} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
@@ -42,7 +41,6 @@ def slience_cmd(cmd):
 
 def copy_to_a6000(source, destination):
     slience_cmd(f"scp {ssh_options} {source} {a6000_login}:{destination}")
-    print(f"copied {source} to a6000")
 
 def copy_tensorboard_logs(log_dir, a6000_log_dir):
     tb_files = glob.glob(os.path.join(log_dir, 'events.out.tfevents.*'))
@@ -341,6 +339,7 @@ def process(pn, args):
         if world_pn == 0:
             copy_to_a6000(os.path.join(log_dir, "acc.txt"), a6000_log_dir)
             copy_tensorboard_logs(log_dir, a6000_log_dir)
+            print(f"copied acc.txt and tensorboard event to a6000")
         
         if pn == 0: 
             if isinstance(model, torch.nn.parallel.DistributedDataParallel):
