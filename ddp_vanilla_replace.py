@@ -241,7 +241,7 @@ def process(pn, args):
     else:
         writer = None
 
-    if world_pn == 0:
+    if world_pn == 0 and args.copy_to_a6000:
         slience_cmd(f"ssh {ssh_options} {a6000_login} 'mkdir -p {a6000_log_dir}'")
         copy_to_a6000(args_file, os.path.join(a6000_log_dir, "args.txt"))
         slience_cmd(f"ssh {ssh_options} {a6000_login} 'mkdir -p {a6000_log_dir}/src'")
@@ -336,7 +336,7 @@ def process(pn, args):
         if lr_scheduler is not None:
             lr_scheduler.step()
 
-        if world_pn == 0:
+        if world_pn == 0 and args.copy_to_a6000:
             copy_to_a6000(os.path.join(log_dir, "acc.txt"), a6000_log_dir)
             copy_tensorboard_logs(log_dir, a6000_log_dir)
             print(f"copied acc.txt and tensorboard event to a6000")
@@ -394,6 +394,8 @@ if __name__ == "__main__":
     parser.add_argument('--num_test_loader_workers', type=int, default=5)
     parser.add_argument('--pbar', type=ast.literal_eval, default=True)
     parser.add_argument('--log_root', type=str)
+
+    parser.add_argument('--copy_to_a6000', type=ast.literal_eval, default=True)
 
     parser.add_argument("--master_ip", type=str, default="127.0.0.1")
     parser.add_argument("--master_port", type=int, default=6105)
@@ -516,7 +518,7 @@ if __name__ == "__main__":
                 if hasattr(args, key) and not key.startswith('resume') and not key.startswith('reload'):
                     if (not key.startswith('batch_size') and not key == 'lr' and not key.startswith('num_train_loader') 
                         and not key.startswith('num_test_loader') and not key == 'total_epochs' and not key == 'master_port'
-                        and not key == 'keep_checkpoints'):
+                        and not key == 'keep_checkpoints' and not key == 'copy_to_a6000'):
                         setattr(args, key, value)
 
     args.node_gpu_count = torch.cuda.device_count()

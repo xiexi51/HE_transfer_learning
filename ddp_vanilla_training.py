@@ -137,8 +137,12 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
         scaler.scale(loss).backward(create_graph=hasattr(optimizer, 'is_second_order') and optimizer.is_second_order)
         accumulated_batches += 1
         train_loss += loss.item()
-                        
-        top1_num = (out_s.argmax(dim=1) == y.argmax(dim=1)).float().sum().item()
+
+        if mixup_fn is not None:                
+            top1_num = (out_s.argmax(dim=1) == y.argmax(dim=1)).float().sum().item()
+        else:
+            top1_num = (out_s.argmax(dim=1) == y).float().sum().item()
+
         top1_total += top1_num
 
         total += x.size(0)
