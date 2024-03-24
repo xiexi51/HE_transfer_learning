@@ -42,7 +42,7 @@ def slience_cmd(cmd):
 
 def copy_to_a6000(source, destination):
     slience_cmd(f"scp {ssh_options} {source} {a6000_login}:{destination}")
-    print(f"copied {source} to a6000:{destination}")
+    print(f"copied {source} to a6000")
 
 def copy_tensorboard_logs(log_dir, a6000_log_dir):
     tb_files = glob.glob(os.path.join(log_dir, 'events.out.tfevents.*'))
