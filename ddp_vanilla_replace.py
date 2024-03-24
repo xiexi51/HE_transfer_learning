@@ -42,6 +42,7 @@ def slience_cmd(cmd):
 
 def copy_to_a6000(source, destination):
     slience_cmd(f"scp {ssh_options} {source} {a6000_login}:{destination}")
+    print(f"copied {source} to a6000:{destination}")
 
 def copy_tensorboard_logs(log_dir, a6000_log_dir):
     tb_files = glob.glob(os.path.join(log_dir, 'events.out.tfevents.*'))
@@ -493,8 +494,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     os.environ['NCCL_DEBUG'] = 'ERROR'
-
-    print(args.log_root)
 
     if args.node_rank_begin == 0:
         if args.keep_checkpoints == -1:
