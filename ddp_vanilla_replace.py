@@ -331,7 +331,7 @@ def process(pn, args):
 
         if pn == 0:
             with open(f"{log_dir}/acc.txt", 'a') as file:
-                file.write(f"{epoch} train {train_acc*100:.2f} test {test_acc*100:.2f} best {best_acc*100:.2f} Lr {optimizer.param_groups[0]['lr']:.2e} act_learn {act_learn:.2f}\n")
+                file.write(f"{epoch} train {train_acc*100:.2f} test {test_acc*100:.2f} best {best_acc*100:.2f} Lr {optimizer.param_groups[0]['lr']:.2e} mask {mask[1]:.4f} act_learn {act_learn:.2f}\n")
         
         if lr_scheduler is not None:
             lr_scheduler.step()
