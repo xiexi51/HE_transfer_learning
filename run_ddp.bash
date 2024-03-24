@@ -1,5 +1,28 @@
 #!/bin/bash
 
+# Define project root directory
+proj_root="/home/aiscuser/HE_transfer_learning"
+cd $proj_root
+
+# Check if local git repo is behind the remote and ask to pull changes if necessary
+git fetch origin
+local_status=$(git status -uno)  # Use -uno to ignore untracked files
+
+if [[ $local_status == *"Your branch is behind"* ]]; then
+  echo "Local repository is behind the remote."
+  read -p "Do you want to perform 'git pull'? [y/N]: " response
+  case "$response" in
+    [yY][eE][sS]|[yY])
+      git pull
+      ;;
+    *)
+      echo "Skipping 'git pull'."
+      ;;
+  esac
+else
+  echo "Local repository is up-to-date."
+fi
+
 # Receives a Python script as the first argument, and passes the remaining arguments to the Python script
 python_script="$1"
 shift  # Remove the first argument, the rest are arguments for the Python script
@@ -38,9 +61,6 @@ node_rank_begin=($(seq 0 8 $(((${#ips[@]} - 1) * 8))))  # Generate node rank beg
 
 # Calculate world size
 world_size=$((${#ips[@]} * 8))
-
-# Define project root directory
-proj_root="/home/aiscuser/HE_transfer_learning"
 
 # Function to check if port is available
 function is_port_available() {
