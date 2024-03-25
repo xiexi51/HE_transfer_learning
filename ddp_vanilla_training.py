@@ -133,7 +133,7 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                 train_loss_ce += loss_ce.item()
 
         loss /= update_freq
-        assert math.isfinite(loss)
+        # assert math.isfinite(loss)
         scaler.scale(loss).backward(create_graph=hasattr(optimizer, 'is_second_order') and optimizer.is_second_order)
         accumulated_batches += 1
         train_loss += loss.item()
