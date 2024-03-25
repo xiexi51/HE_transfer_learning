@@ -103,7 +103,7 @@ for i in "${!slave_ips[@]}"; do
   slave_command="$update_cmd && $copy_cmd && python $python_script $args --log_root $log_root --master_ip $master_ip --world_size $world_size --node_rank_begin $rank_begin &"
 
   # Execute the commands on the slave node
-  ssh aiscuser@$ip "$slave_command"  # Execute the commands on the slave node
+  ssh aiscuser@$ip "$slave_command" &  # Execute the commands on the slave node
 done
 
 # Optionally, wait for all background processes to finish
