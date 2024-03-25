@@ -100,7 +100,7 @@ for i in "${!slave_ips[@]}"; do
   copy_cmd="echo 'Copying Python files and ip_list from master...' && scp $master_ip:$proj_root/*.py $proj_root/ && scp $master_ip:$proj_root/ip_list $proj_root/"
 
   # Command to run Python script on slave node, executed in the background
-  slave_command="$update_cmd && $copy_cmd && python $python_script $args --log_root $log_root --master_ip $master_ip --world_size $world_size --node_rank_begin $rank_begin &"
+  slave_command="$update_cmd && $copy_cmd && python $python_script $args --log_root $log_root --master_ip $master_ip --world_size $world_size --node_rank_begin $rank_begin "
 
   # Execute the commands on the slave node
   ssh aiscuser@$ip "$slave_command" &  # Execute the commands on the slave node
