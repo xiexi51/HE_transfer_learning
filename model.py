@@ -10,15 +10,22 @@ class general_relu_poly(nn.Module):
         self.num_channels = num_channels
         self.rand_mask = None
 
+        self.weight_a = None
+        self.weight_b = None
+        self.weight_c = None
+
+        self.weight_inits = weight_inits
+
         if len(weight_inits) != 3:
             raise ValueError("weight_inits must be of length 3")
         if len(factors) != 3:
             raise ValueError("factors must be of length 3")
         if if_channel:
-            initial_weights = torch.zeros(num_channels, 3)
-            for i, weight_init in enumerate(weight_inits):
-                initial_weights[:, i] = weight_init  
-            self.weight = nn.Parameter(initial_weights, requires_grad=True)
+            pass
+            # initial_weights = torch.zeros(num_channels, 3)
+            # for i, weight_init in enumerate(weight_inits):
+            #     initial_weights[:, i] = weight_init  
+            # self.weight = nn.Parameter(initial_weights, requires_grad=True)
         else:
             self.weight = nn.Parameter(torch.FloatTensor(weight_inits), requires_grad=True)
         
@@ -33,20 +40,28 @@ class general_relu_poly(nn.Module):
         if mask is None or mask == -1:
             y = F.relu(x)
         else:
+            if self.weight_a is None:
+                self.weight_a = nn.Parameter(torch.full(x.shape[1:], self.weight_inits[0], device=x.device), requires_grad=True)
+                self.weight_b = nn.Parameter(torch.full(x.shape[1:], self.weight_inits[1], device=x.device), requires_grad=True)
+                self.weight_c = nn.Parameter(torch.full(x.shape[1:], self.weight_inits[2], device=x.device), requires_grad=True)
+
             if self.if_channel:
-                weights = self.weight.unsqueeze(-1).unsqueeze(-1)
-                weights = weights.expand(-1, -1, x.size(2), x.size(3))
-                # square_term = weights[:, 0, :, :] * torch.mul(x, x) * self.factors[0]
-                # linear_term = weights[:, 1, :, :] * x * self.factors[1]
-                # constant_term = weights[:, 2, :, :] * self.factors[2]
-                y = (weights[:, 0, :, :] * self.factors[0] * x + weights[:, 1, :, :] * self.factors[1]) * x + weights[:, 2, :, :] * self.factors[2]
+                # weights = self.weight.unsqueeze(-1).unsqueeze(-1)
+                # weights = weights.expand(-1, -1, x.size(2), x.size(3))
+                # # square_term = weights[:, 0, :, :] * torch.mul(x, x) * self.factors[0]
+                # # linear_term = weights[:, 1, :, :] * x * self.factors[1]
+                # # constant_term = weights[:, 2, :, :] * self.factors[2]
+                # y = (weights[:, 0, :, :] * self.factors[0] * x + weights[:, 1, :, :] * self.factors[1]) * x + weights[:, 2, :, :] * self.factors[2]
                 
+                y = (self.weight_a * self.factors[0] * x + self.weight_b * self.factors[1]) * x + self.weight_c * self.factors[2]
+
             else:
                 y = (self.weight[0] * self.factors[0] * x + self.weight[1] * self.factors[1]) * x + self.weight[2] * self.factors[2]
 
             if self.if_pixel:
                 if self.rand_mask is None:
                     self.rand_mask = nn.Parameter(torch.rand(x.shape[1:], device=x.device), requires_grad=False)
+                
                 if_relu = mask > self.rand_mask
                 y = F.relu(x) * if_relu.float() + y * (1 - if_relu.float()) 
             else:
