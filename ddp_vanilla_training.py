@@ -76,6 +76,9 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
         else:
             mask_iter = 0
             mask_current = mask[1]
+    else:
+        mask_iter = 0
+        mask_current = 0
 
     accumulated_batches = 0
 

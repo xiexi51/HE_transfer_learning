@@ -16,7 +16,7 @@ import torch.distributed as dist
 from utils_dataset import build_imagenet_dataset
 from timm.data import Mixup
 from vanillanet_deploy_poly import vanillanet_5_deploy_poly, vanillanet_6_deploy_poly, VanillaNet_deploy_poly
-# from vanillanet_avg import vanillanet_5_avg, vanillanet_6_avg
+from vanillanet_avg import vanillanet_5_avg, vanillanet_6_avg
 
 import timm
 from timm.utils import ModelEma
@@ -90,9 +90,9 @@ def process(pn, args):
 
     # model = vanillanet_6_deploy_poly(args.poly_weight_inits, args.poly_weight_factors, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
 
-    model = vanillanet_5_deploy_poly(args.poly_weight_inits, args.poly_weight_factors, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
+    # model = vanillanet_5_deploy_poly(args.poly_weight_inits, args.poly_weight_factors, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
         
-    # model = vanillanet_5_avg(if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
+    model = vanillanet_5_avg(if_fix_poly = False, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
 
     # model = vanillanet_6_avg(if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
 
@@ -296,7 +296,8 @@ def process(pn, args):
             adjust_learning_rate(optimizer, epoch, args.lr, args.lr_step_size, args.lr_gamma)
 
         train_sampler.set_epoch(epoch)
-        mask = mask_provider.get_mask(epoch)
+        # mask = mask_provider.get_mask(epoch)
+        mask = None
 
         if not args.deploy:
             if epoch < args.decay_epochs:
@@ -485,7 +486,7 @@ if __name__ == "__main__":
     parser.add_argument('--resume_log_root', type=ast.literal_eval, default=False)
 
     parser.add_argument('--reload', type=ast.literal_eval, default=False)
-    parser.add_argument('--reload_file', type=str)
+    parser.add_argument('--reload_file', type=str, default=None)
 
     parser.add_argument('--teacher_file', type=str, default=None)
 

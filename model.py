@@ -2,6 +2,38 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class fix_relu_poly(nn.Module):
+    def __init__(self, if_pixel, factors):
+        super(general_relu_poly, self).__init__()
+        self.if_pixel = if_pixel
+        self.rand_mask = None
+        if len(factors) != 3:
+            raise ValueError("factors must be of length 3")
+        self.factors = nn.Parameter(torch.FloatTensor(factors), requires_grad=False)
+    
+    def forward(self, x, mask):
+        if mask is None or mask == -1:
+            y = F.relu(x)
+        else:
+            y = (self.factors[0] * x + self.factors[1]) * x + self.factors[2]
+            if self.if_pixel:
+                if self.rand_mask is None:
+                    self.rand_mask = nn.Parameter(torch.rand(x.shape[1:], device=x.device), requires_grad=False)
+                if_relu = mask > self.rand_mask
+                y = F.relu(x) * if_relu.float() + y * (1 - if_relu.float()) 
+            else:
+                y = F.relu(x) * mask + y * (1 - mask)
+
+        return y
+    
+    def get_relu_density(self, mask):
+        if not self.if_pixel:
+            raise ValueError("get_relu_density can only be called when if_pixel is True")
+        if_relu = mask > self.rand_mask
+        total_elements = self.rand_mask.numel()
+        relu_elements = if_relu.sum().item()
+        return total_elements, relu_elements
+
 class general_relu_poly(nn.Module):
     def __init__(self, if_channel, if_pixel, weight_inits, factors, num_channels):
         super(general_relu_poly, self).__init__()
