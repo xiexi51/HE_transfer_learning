@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 class fix_relu_poly(nn.Module):
     def __init__(self, if_pixel, factors):
-        super(general_relu_poly, self).__init__()
+        super().__init__()
         self.if_pixel = if_pixel
         self.rand_mask = None
         if len(factors) != 3:
@@ -36,7 +36,7 @@ class fix_relu_poly(nn.Module):
 
 class general_relu_poly(nn.Module):
     def __init__(self, if_channel, if_pixel, weight_inits, factors, num_channels):
-        super(general_relu_poly, self).__init__()
+        super().__init__()
         self.if_channel = if_channel
         self.if_pixel = if_pixel
         self.num_channels = num_channels
@@ -115,7 +115,7 @@ class BasicBlockPoly(nn.Module):
     expansion = 1
 
     def __init__(self, in_planes, planes, stride, if_channel, if_pixel, weight_inits, factors, relu2_extra_factor=1):
-        super(BasicBlockPoly, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(
             in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(planes)
@@ -164,7 +164,7 @@ class BasicBlockPoly(nn.Module):
 
 class ResNetPoly(nn.Module):
     def __init__(self, block, num_blocks, num_classes, if_channel, if_pixel, poly_weight_inits, poly_factors, relu2_extra_factor):
-        super(ResNetPoly, self).__init__()
+        super().__init__()
         self.in_planes = 64
 
         self.if_channel = if_channel

@@ -14,7 +14,7 @@ from model import fix_relu_poly
 
 # Series informed activation function. Implemented by conv.
 class activation(nn.ReLU):
-    def __init__(self, if_fix_poly, dim, act_num=3, deploy=False):
+    def __init__(self, if_fix_poly, poly_factors, dim, act_num=3, deploy=False):
         super(activation, self).__init__()
         self.act_num = act_num
         self.deploy = deploy
@@ -28,16 +28,16 @@ class activation(nn.ReLU):
         nn.init.trunc_normal_(self.weight, std=.02)
 
         if if_fix_poly:
-            self.relu = fix_relu_poly()
+            self.relu = fix_relu_poly(False, poly_factors)
         else:
             self.relu = nn.ReLU()
 
     def forward(self, x):
         if self.deploy:
-            x = self.relu(x)
+            x = self.relu(x, 0)
             x = F.conv2d(x, self.weight, self.bias, padding=self.act_num, groups=self.dim)
         else:
-            x = self.relu(x)
+            x = self.relu(x, 0)
             x = F.conv2d(x, self.weight, self.bias, padding=self.act_num, groups=self.dim)
             x = self.bn(x)
         return x
@@ -63,7 +63,7 @@ class activation(nn.ReLU):
 
 
 class BlockAvg(nn.Module):
-    def __init__(self, if_fix_poly, dim, dim_out, act_num=3, stride=2, deploy=False, ada_pool=None, if_shortcut=True, keep_bn = False):
+    def __init__(self, if_fix_poly, poly_factors, dim, dim_out, act_num=3, stride=2, deploy=False, ada_pool=None, if_shortcut=True, keep_bn = False):
         super().__init__()
         self.dim = dim
         self.dim_out = dim_out
@@ -92,7 +92,7 @@ class BlockAvg(nn.Module):
         else:
             self.pool = nn.Identity() if stride == 1 else nn.AdaptiveAvgPool2d((ada_pool, ada_pool))
 
-        self.act = activation(if_fix_poly, dim_out, act_num, deploy=self.deploy)
+        self.act = activation(if_fix_poly, poly_factors, dim_out, act_num, deploy=self.deploy)
 
         self.if_shortcut = if_shortcut
 
@@ -171,7 +171,7 @@ class BlockAvg(nn.Module):
     
 
 class VanillaNetAvg(nn.Module):
-    def __init__(self, if_fix_poly, in_chans=3, num_classes=1000, dims=[96, 192, 384, 768], 
+    def __init__(self, if_fix_poly, poly_factors, in_chans=3, num_classes=1000, dims=[96, 192, 384, 768], 
                  drop_rate=0, act_num=3, strides=[2,2,2,1], deploy=False, ada_pool=None, if_shortcut=True, keep_bn=False, **kwargs):
         super().__init__()
 
@@ -186,7 +186,7 @@ class VanillaNetAvg(nn.Module):
             self.stem_conv = nn.Conv2d(in_chans, dims[0], kernel_size=4, stride=stride, padding=padding)
             if self.keep_bn:
                 self.stem_bn = nn.BatchNorm2d(dims[0], eps=1e-6)
-            self.stem_act = activation(if_fix_poly, dims[0], act_num, deploy=self.deploy)
+            self.stem_act = activation(if_fix_poly, poly_factors, dims[0], act_num, deploy=self.deploy)
         else:
             self.stem1 = nn.Sequential(
                 nn.Conv2d(in_chans, dims[0], kernel_size=4, stride=stride, padding=padding),
@@ -195,7 +195,7 @@ class VanillaNetAvg(nn.Module):
             self.stem2 = nn.Sequential(
                 nn.Conv2d(dims[0], dims[0], kernel_size=1, stride=1),
                 nn.BatchNorm2d(dims[0], eps=1e-6),
-                activation(if_fix_poly, dims[0], act_num)
+                activation(if_fix_poly, poly_factors, dims[0], act_num)
             )
 
         self.act_learn = 1
@@ -203,9 +203,9 @@ class VanillaNetAvg(nn.Module):
         self.stages = nn.ModuleList()
         for i in range(len(strides)):
             if not ada_pool:
-                stage = BlockAvg(if_fix_poly, dim=dims[i], dim_out=dims[i+1], act_num=act_num, stride=strides[i], deploy=deploy, if_shortcut=if_shortcut, keep_bn=keep_bn)
+                stage = BlockAvg(if_fix_poly, poly_factors, dim=dims[i], dim_out=dims[i+1], act_num=act_num, stride=strides[i], deploy=deploy, if_shortcut=if_shortcut, keep_bn=keep_bn)
             else:
-                stage = BlockAvg(if_fix_poly, dim=dims[i], dim_out=dims[i+1], act_num=act_num, stride=strides[i], deploy=deploy, ada_pool=ada_pool[i], if_shortcut=if_shortcut, keep_bn=keep_bn)
+                stage = BlockAvg(if_fix_poly, poly_factors, dim=dims[i], dim_out=dims[i+1], act_num=act_num, stride=strides[i], deploy=deploy, ada_pool=ada_pool[i], if_shortcut=if_shortcut, keep_bn=keep_bn)
             self.stages.append(stage)
         self.depth = len(strides)
 
@@ -314,13 +314,13 @@ class VanillaNetAvg(nn.Module):
 
 
 @register_model
-def vanillanet_5_avg(if_fix_poly, if_shortcut, keep_bn, **kwargs):
-    model = VanillaNetAvg(if_fix_poly, dims=[128*4, 256*4, 512*4, 1024*4], strides=[2,2,2], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
+def vanillanet_5_avg(if_fix_poly, poly_factors, if_shortcut, keep_bn, **kwargs):
+    model = VanillaNetAvg(if_fix_poly, poly_factors, dims=[128*4, 256*4, 512*4, 1024*4], strides=[2,2,2], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
     return model
 
 @register_model
-def vanillanet_6_avg(if_fix_poly, if_shortcut, keep_bn, **kwargs):
-    model = VanillaNetAvg(if_fix_poly, dims=[128*4, 256*4, 512*4, 1024*4, 1024*4], strides=[2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
+def vanillanet_6_avg(if_fix_poly, poly_factors, if_shortcut, keep_bn, **kwargs):
+    model = VanillaNetAvg(if_fix_poly, poly_factors, dims=[128*4, 256*4, 512*4, 1024*4, 1024*4], strides=[2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
     return model
 
 # @register_model

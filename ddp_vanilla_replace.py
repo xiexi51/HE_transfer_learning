@@ -92,7 +92,7 @@ def process(pn, args):
 
     # model = vanillanet_5_deploy_poly(args.poly_weight_inits, args.poly_weight_factors, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
         
-    model = vanillanet_5_avg(if_fix_poly = args.if_fix_poly, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
+    model = vanillanet_5_avg(if_fix_poly = args.if_fix_poly, poly_factors = args.poly_weight_factors, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
 
     # model = vanillanet_6_avg(if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
 
