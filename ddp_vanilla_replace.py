@@ -92,7 +92,7 @@ def process(pn, args):
 
     # model = vanillanet_5_deploy_poly(args.poly_weight_inits, args.poly_weight_factors, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
         
-    model = vanillanet_5_avg(if_fix_poly = False, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
+    model = vanillanet_5_avg(if_fix_poly = args.if_fix_poly, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
 
     # model = vanillanet_6_avg(if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
 
@@ -298,6 +298,7 @@ def process(pn, args):
         train_sampler.set_epoch(epoch)
         # mask = mask_provider.get_mask(epoch)
         mask = None
+        mask_end = 0
 
         if not args.deploy:
             if epoch < args.decay_epochs:
@@ -317,9 +318,9 @@ def process(pn, args):
         if pn == 0:
             if mask is not None:
                 print("mask = ", mask)
-                writer.add_scalar('mask_end value', mask[1], epoch)
+                writer.add_scalar('mask_end value', mask_end, epoch)
             if isinstance(model.module, VanillaNet_deploy_poly) and args.pixel_wise:
-                total_elements, relu_elements = model.module.get_relu_density(mask[1])
+                total_elements, relu_elements = model.module.get_relu_density(mask_end)
                 print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
         
         omit_fms = 0
@@ -327,12 +328,15 @@ def process(pn, args):
                                       mask=mask, writer=writer, world_pn=world_pn, omit_fms=omit_fms, mixup_fn=mixup_fn, criterion_ce=criterion_ce, 
                                       max_norm=None, update_freq=args.update_freq, model_ema=None, act_learn=act_learn)
 
-        if True or mask[1] < 0.01:
-            test_acc = ddp_test(args, testloader, model, epoch, best_acc, mask[1], writer, world_pn)
+        if True or mask_end < 0.01:
+            if mask is not None:
+                test_acc = ddp_test(args, testloader, model, epoch, best_acc, mask_end, writer, world_pn)
+            else:
+                test_acc = ddp_test(args, testloader, model, epoch, best_acc, None, writer, world_pn)
 
         if pn == 0:
             with open(f"{log_dir}/acc.txt", 'a') as file:
-                file.write(f"{epoch} train {train_acc*100:.2f} test {test_acc*100:.2f} best {best_acc*100:.2f} Lr {optimizer.param_groups[0]['lr']:.2e} mask {mask[1]:.4f} act_learn {act_learn:.2f}\n")
+                file.write(f"{epoch} train {train_acc*100:.2f} test {test_acc*100:.2f} best {best_acc*100:.2f} Lr {optimizer.param_groups[0]['lr']:.2e} mask {mask_end:.4f} act_learn {act_learn:.2f}\n")
             writer.flush()
         
         if lr_scheduler is not None:
@@ -412,6 +416,8 @@ if __name__ == "__main__":
     parser.add_argument('--vanilla_keep_bn', type=ast.literal_eval, default=False)
 
     parser.add_argument('--update_freq', default=1, type=int, help='gradient accumulation steps')
+
+    parser.add_argument('--if_fix_poly', type=ast.literal_eval, default=False)
 
     
     # imagenet dataset arguments
