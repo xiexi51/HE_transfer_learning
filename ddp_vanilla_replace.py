@@ -68,6 +68,7 @@ def process(pn, args):
     start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 
     mask_provider = MaskProvider(args.mask_decrease, args.mask_epochs)
+    act_learn_provider = MaskProvider(args.act_learn_increase, args.act_learn_epochs)
 
     print("gpu count =", torch.cuda.device_count())
     
@@ -92,7 +93,7 @@ def process(pn, args):
 
     # model = vanillanet_5_deploy_poly(args.poly_weight_inits, args.poly_weight_factors, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
         
-    model = vanillanet_5_avg(if_fix_poly = args.if_fix_poly, poly_factors = args.poly_weight_factors, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
+    model = vanillanet_5_avg(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.vanilla_shortcut, args.vanilla_keep_bn)
 
     # model = vanillanet_6_avg(if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
 
@@ -301,13 +302,8 @@ def process(pn, args):
         mask_end = 0
 
         if not args.deploy:
-            if epoch < args.decay_epochs:
-                if args.decay_linear:
-                    act_learn = epoch / args.decay_epochs * 1.0
-                else:
-                    act_learn = 0.5 * (1 - math.cos(math.pi * epoch / args.decay_epochs)) * 1.0
-            else:
-                act_learn = 1
+            act_learn_begin, act_learn_end = act_learn_provider.get_mask(epoch)
+            act_learn = 1 - act_learn_end
             
             model.module.change_act(act_learn)
         else:
@@ -417,7 +413,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--update_freq', default=1, type=int, help='gradient accumulation steps')
 
-    parser.add_argument('--if_fix_poly', type=ast.literal_eval, default=False)
+    parser.add_argument('--act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix'])
 
     
     # imagenet dataset arguments
@@ -448,8 +444,9 @@ if __name__ == "__main__":
     parser.add_argument('--momentum', default=0.9, type=float)
     parser.add_argument('--w_decay', default=0e-4, type=float, help='w decay rate')
     parser.add_argument('--optim', type=str, default='lamb', choices = ['sgd', 'adamw', 'lamb'])
-    parser.add_argument('--decay_epochs', default=100, type=int, help='for deep training strategy')
-    parser.add_argument('--decay_linear', type=ast.literal_eval, default=True, help='cos/linear for decay manner')
+
+    # parser.add_argument('--decay_epochs', default=100, type=int, help='for deep training strategy')
+    # parser.add_argument('--decay_linear', type=ast.literal_eval, default=True, help='cos/linear for decay manner')
 
     parser.add_argument('--use_amp', type=ast.literal_eval, default=False, help="Use PyTorch's AMP (Automatic Mixed Precision) or not")
     
@@ -470,6 +467,11 @@ if __name__ == "__main__":
     parser.add_argument('--mask_decrease', type=str, default='1-sinx', choices = ['0', '1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
     parser.add_argument('--mask_epochs', default=6, type=int, help='the epoch that the relu replacing mask will decrease to 0')
     parser.add_argument('--mask_mini_batch', type=ast.literal_eval, default=True, help='if enable mini batch mask decrease')
+
+    parser.add_argument('--act_learn_increase', type=str, default='1-sinx', choices = ['0', '1-sinx', 'e^(-x/10)', 'linear'])
+    parser.add_argument('--act_learn_epochs', default=20, type=int)
+    # parser.add_argument('--act_learn_mini_batch', type=ast.literal_eval, default=True)
+
 
     parser.add_argument('--loss_fm_type', type=str, default='at', choices = ['at', 'mse', 'custom_mse'], help='the type for the feature map loss')
     parser.add_argument('--loss_fm_factor', default=100, type=float, help='the factor of the feature map loss, set to 0 to disable')
