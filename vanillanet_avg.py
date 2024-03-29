@@ -36,10 +36,16 @@ class activation(nn.ReLU):
 
     def forward(self, x):
         if self.deploy:
-            x = self.relu(x, 0)
+            if isinstance(self.relu, nn.ReLU):
+                x = self.relu(x)
+            else:
+                x = self.relu(x, 0)
             x = F.conv2d(x, self.weight, self.bias, padding=self.act_num, groups=self.dim)
         else:
-            x = self.relu(x, 0)
+            if isinstance(self.relu, nn.ReLU):
+                x = self.relu(x)
+            else:
+                x = self.relu(x, 0)
             x = F.conv2d(x, self.weight, self.bias, padding=self.act_num, groups=self.dim)
             x = self.bn(x)
         return x
