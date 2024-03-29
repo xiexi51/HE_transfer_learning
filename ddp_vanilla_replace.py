@@ -464,11 +464,11 @@ if __name__ == "__main__":
     parser.add_argument('--channel_wise', type=ast.literal_eval, default=True, help='if use channel-wise relu_poly class')
     parser.add_argument('--poly_weight_inits', nargs=3, type=float, default=[0, 0.1, 0], help='relu_poly weights initial values')
     parser.add_argument('--poly_weight_factors', nargs=3, type=float, default=[0.03, 0.5, 0.1], help='adjust the learning rate of the three weights in relu_poly')
-    parser.add_argument('--mask_decrease', type=str, default='1-sinx', choices = ['0', '1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
+    parser.add_argument('--mask_decrease', type=str, default='1-sinx', choices = ['0', '1', '1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
     parser.add_argument('--mask_epochs', default=6, type=int, help='the epoch that the relu replacing mask will decrease to 0')
     parser.add_argument('--mask_mini_batch', type=ast.literal_eval, default=True, help='if enable mini batch mask decrease')
 
-    parser.add_argument('--act_learn_increase', type=str, default='1-sinx', choices = ['0', '1-sinx', 'e^(-x/10)', 'linear'])
+    parser.add_argument('--act_learn_increase', type=str, default='1-sinx', choices = ['0', '1', '1-sinx', 'e^(-x/10)', 'linear'])
     parser.add_argument('--act_learn_epochs', default=20, type=int)
     # parser.add_argument('--act_learn_mini_batch', type=ast.literal_eval, default=True)
 

@@ -150,6 +150,8 @@ class MaskProvider:
             self.mask_y = np.exp(-mask_x / 10)
         elif decrease_type == "linear": 
             self.mask_y = np.linspace(1, 0, mask_epochs + 1)
+        elif decrease_type == "1":
+            self.mask_y = np.ones(mask_epochs + 1)
         else:
             self.mask_y = np.zeros(mask_epochs + 1)
 
