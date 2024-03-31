@@ -258,7 +258,7 @@ def process(pn, args):
         #     total_elements, relu_elements = model.module.get_relu_density(_mask)    
         #     print(f"total_elements {total_elements}, relu_elements {relu_elements}, relu density = {relu_elements/total_elements}")
         
-        if args.world_size > 1:
+        if False and args.world_size > 1:
             ddp_test(args, testloader, model_t, _test_epoch, best_acc, -1, writer, pn)
             ddp_test(args, testloader, model, _test_epoch, best_acc, 1, writer, pn)
 
