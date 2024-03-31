@@ -516,7 +516,7 @@ if __name__ == "__main__":
                 if hasattr(args, key) and not key.startswith('resume') and not key.startswith('reload'):
                     if (not key.startswith('batch_size') and not key == 'lr' and not key.startswith('num_train_loader') 
                         and not key.startswith('num_test_loader') and not key == 'total_epochs' and not key == 'master_port'
-                        and not key == 'keep_checkpoints' and not key == 'copy_to_a6000'):
+                        and not key == 'keep_checkpoints' and not key == 'copy_to_a6000' and not key == 'log_root'):
                         setattr(args, key, value)
 
     args.node_gpu_count = torch.cuda.device_count()
