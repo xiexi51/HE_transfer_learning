@@ -15,8 +15,8 @@ import torch.multiprocessing as mp
 import torch.distributed as dist
 from utils_dataset import build_imagenet_dataset
 from timm.data import Mixup
-from vanillanet_deploy_poly import vanillanet_5_deploy_poly, vanillanet_6_deploy_poly, VanillaNet_deploy_poly
-from vanillanet_avg import vanillanet_5_avg, vanillanet_6_avg
+from vanillanet_deploy_poly import VanillaNet_deploy_poly
+from vanillanet_avg_full_poly import vanillanet_5_avg_full_poly, vanillanet_6_avg_full_poly
 
 import timm
 from timm.utils import ModelEma
@@ -89,25 +89,20 @@ def process(pn, args):
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=1000 )
 
-    # model = vanillanet_6_deploy_poly(args.poly_weight_inits, args.poly_weight_factors, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
-
-    # model = vanillanet_5_deploy_poly(args.poly_weight_inits, args.poly_weight_factors, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
-        
-    model = vanillanet_5_avg(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.vanilla_shortcut, args.vanilla_keep_bn)
-
-    # model = vanillanet_6_avg(if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn)
+    model = vanillanet_5_avg_full_poly(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.vanilla_shortcut, args.vanilla_keep_bn)
 
     if args.teacher_file is not None:
-        model_t = vanillanet_5_deploy_poly([0, 0, 0], [0, 0, 0], if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
+        model_t = vanillanet_5_avg_full_poly("relu", [0, 0, 0], [0, 0, 0], if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
         print(f"Loading teacher: {args.teacher_file}")     
-        model_t.load_state_dict(torch.load(args.teacher_file), strict=False)
+        teacher_checkpoint = torch.load(args.teacher_file)
+        model_t.load_state_dict(teacher_checkpoint["model_state_dict"], strict=False)
     else:
         model_t = None
     
+    dummy_input = torch.rand(10, 3, 224, 224) 
+    model((dummy_input, 0))
     if isinstance(model, VanillaNet_deploy_poly):
-        assert args.deploy == True
-        dummy_input = torch.rand(1, 3, 224, 224) 
-        model((dummy_input, 0))
+        assert args.deploy == True    
         _msg = "create deploy model"
     else:
         _msg = "create full model"
@@ -138,19 +133,9 @@ def process(pn, args):
         if checkpoint_path and os.path.exists(checkpoint_path):
             print(f"Loading checkpoint: {checkpoint_path}")
             checkpoint = torch.load(checkpoint_path)
-
-            # model.load_state_dict(checkpoint['model_state_dict'], strict=True)
-            # model.load_state_dict(checkpoint['model'], strict=True)
-            
-            model.load_state_dict(checkpoint, strict=False)
-            
-            # model_t.load_state_dict(checkpoint, strict=False)
+            model.load_state_dict(checkpoint['model_state_dict'], strict=False)
         else:
             print(f"No checkpoint found at {checkpoint_path}")
-    
-    
-    # for param in model.cls.parameters():
-    #     param.requires_grad = False
 
     model = model.cuda()
 
@@ -273,7 +258,9 @@ def process(pn, args):
         #     total_elements, relu_elements = model.module.get_relu_density(_mask)    
         #     print(f"total_elements {total_elements}, relu_elements {relu_elements}, relu density = {relu_elements/total_elements}")
         
-        # test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, _mask, writer, pn)
+        if args.world_size > 1:
+            ddp_test(args, testloader, model_t, _test_epoch, best_acc, -1, writer, pn)
+            ddp_test(args, testloader, model, _test_epoch, best_acc, 1, writer, pn)
 
         # if isinstance(model.module, VanillaNet_deploy_poly):
         #     test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, -1, writer, pn)
@@ -297,17 +284,18 @@ def process(pn, args):
             adjust_learning_rate(optimizer, epoch, args.lr, args.lr_step_size, args.lr_gamma)
 
         train_sampler.set_epoch(epoch)
-        # mask = mask_provider.get_mask(epoch)
-        mask = None
-        mask_end = 0
+        mask = mask_provider.get_mask(epoch)
+        mask_begin, mask_end = mask
 
-        if not args.deploy:
-            act_learn_begin, act_learn_end = act_learn_provider.get_mask(epoch)
-            act_learn = 1 - act_learn_end
+        # if not args.deploy:
+        #     act_learn_begin, act_learn_end = act_learn_provider.get_mask(epoch)
+        #     act_learn = 1 - act_learn_end
             
-            model.module.change_act(act_learn)
-        else:
-            act_learn = 1
+        #     model.module.change_act(act_learn)
+        # else:
+        #     act_learn = 1
+
+        act_learn = 0
 
         # mask = 1
 

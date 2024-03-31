@@ -16,11 +16,9 @@ from typing import Tuple
 
 def set_forward_with_fms(model, if_forward_with_fms):
     if isinstance(model, DistributedDataParallel):
-        if isinstance(model.module, VanillaNet_deploy_poly):
-            model.module.if_forward_with_fms = if_forward_with_fms
+        model.module.if_forward_with_fms = if_forward_with_fms
     else:
-        if isinstance(model, VanillaNet_deploy_poly):
-            model.if_forward_with_fms = if_forward_with_fms
+        model.if_forward_with_fms = if_forward_with_fms
 
 
 def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Module, model_t: torch.nn.Module, optimizer: torch.optim.Optimizer, 

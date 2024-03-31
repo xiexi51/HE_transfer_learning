@@ -96,6 +96,7 @@ class general_relu_poly(nn.Module):
             else:
                 y = F.relu(x) * mask + y * (1 - mask)
 
+        # print("general_relu_poly forward")
         return y
     
     def get_relu_density(self, mask):
