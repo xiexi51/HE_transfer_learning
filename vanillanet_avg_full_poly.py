@@ -325,7 +325,7 @@ class VanillaNetAvgPoly(nn.Module):
     
     def get_relu_density(self, mask):
         total, relu = self.stem_relu.get_relu_density(mask)
-        _total, _relu = self.self.stem2[2].get_relu_density(mask)
+        _total, _relu = self.stem2[2].get_relu_density(mask)
         total += _total
         relu += _relu
 
