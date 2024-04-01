@@ -16,7 +16,8 @@ import torch.distributed as dist
 from utils_dataset import build_imagenet_dataset
 from timm.data import Mixup
 from vanillanet_deploy_poly import VanillaNet_deploy_poly
-from vanillanet_avg_full_poly import vanillanet_5_avg_full_poly, vanillanet_6_avg_full_poly, VanillaNetAvgPoly
+# from vanillanet_avg_full_poly import vanillanet_5_avg_full_poly, vanillanet_6_avg_full_poly, VanillaNetAvgPoly
+from vanillanet_avg_full_poly import vanillanet_6_avg_full_poly, VanillaNetAvgPoly
 
 import timm
 from timm.utils import ModelEma
@@ -89,10 +90,10 @@ def process(pn, args):
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=1000 )
 
-    model = vanillanet_5_avg_full_poly(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.vanilla_shortcut, args.vanilla_keep_bn)
+    model = vanillanet_6_avg_full_poly(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.vanilla_shortcut, args.vanilla_keep_bn)
 
     if args.teacher_file is not None:
-        model_t = vanillanet_5_avg_full_poly("relu", [0, 0, 0], [0, 0, 0], if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
+        model_t = vanillanet_6_avg_full_poly("relu", [0, 0, 0], [0, 0, 0], if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
         print(f"Loading teacher: {args.teacher_file}")     
         teacher_checkpoint = torch.load(args.teacher_file)
         model_t.load_state_dict(teacher_checkpoint["model_state_dict"], strict=False)
@@ -303,7 +304,7 @@ def process(pn, args):
             if mask is not None:
                 print("mask = ", mask)
                 writer.add_scalar('mask_end value', mask_end, epoch)
-            if isinstance(model.module, VanillaNetAvgPoly) and args.pixel_wise:
+            if isinstance(model.module, VanillaNetAvgPoly) and args.act_relu_type != "relu" and args.pixel_wise:
                 total_elements, relu_elements = model.module.get_relu_density(mask_end)
                 print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
         
