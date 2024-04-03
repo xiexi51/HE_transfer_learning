@@ -278,6 +278,8 @@ def process(pn, args):
     # start_epoch = 300
     # args.total_epochs = 500
 
+    torch.cuda.empty_cache()
+
     recent_checkpoints = []
 
     for epoch in range(start_epoch, args.total_epochs):
