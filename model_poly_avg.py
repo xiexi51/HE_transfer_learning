@@ -64,25 +64,28 @@ class BasicBlockAvgCustom(nn.Module):
 
 
 class ResNetAvgCustom(nn.Module):
-    def __init__(self, block, num_blocks, num_classes, relu_type, poly_weight_inits, poly_factors):
+    def __init__(self, block, num_blocks, num_classes, relu_type, poly_weight_inits, poly_factors, if_wide):
         super().__init__()
-        self.in_planes = 64
-
         self.relu_type = relu_type
         self.poly_weight_inits = poly_weight_inits
         self.poly_factors = poly_factors
+        self.avgpool = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
 
+        self.in_planes = 64
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
-        self.avgpool = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
-        
-
-        self.layer1 = self._create_blocks(block, 64, num_blocks[0], stride=1)
-        self.layer2 = self._create_blocks(block, 128, num_blocks[1], stride=2)
-        self.layer3 = self._create_blocks(block, 256, num_blocks[2], stride=2)
-        self.layer4 = self._create_blocks(block, 512, num_blocks[3], stride=2)
-
-        self.linear = nn.Linear(512*block.expansion, num_classes)
+        if not if_wide:
+            self.layer1 = self._create_blocks(block, 64, num_blocks[0], stride=1)
+            self.layer2 = self._create_blocks(block, 128, num_blocks[1], stride=2)
+            self.layer3 = self._create_blocks(block, 256, num_blocks[2], stride=2)
+            self.layer4 = self._create_blocks(block, 512, num_blocks[3], stride=2)
+            self.linear = nn.Linear(512*block.expansion, num_classes)
+        else:
+            self.layer1 = self._create_blocks(block, 128, num_blocks[0], stride=1)
+            self.layer2 = self._create_blocks(block, 256, num_blocks[1], stride=2)
+            self.layer3 = self._create_blocks(block, 512, num_blocks[2], stride=2)
+            self.layer4 = self._create_blocks(block, 1024, num_blocks[3], stride=2)
+            self.linear = nn.Linear(1024*block.expansion, num_classes)
 
         self.relu1 = custom_relu(relu_type, poly_weight_inits, poly_factors, 64)
 
@@ -132,6 +135,7 @@ class ResNetAvgCustom(nn.Module):
                 relu += _relu
         return total, relu
         
-def ResNet18AvgCustom(relu_type, poly_weight_inits, poly_factors):
-    return ResNetAvgCustom(BasicBlockAvgCustom, [2, 2, 2, 2], 1000, relu_type, poly_weight_inits, poly_factors)
+def ResNet18AvgCustom(relu_type, poly_weight_inits, poly_factors, if_wide):
+    return ResNetAvgCustom(BasicBlockAvgCustom, [2, 2, 2, 2], 1000, relu_type, poly_weight_inits, poly_factors, if_wide)
+
 

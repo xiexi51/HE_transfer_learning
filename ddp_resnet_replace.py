@@ -90,11 +90,11 @@ def process(pn, args):
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=1000 )
 
-    model = ResNet18AvgCustom(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors)
+    model = ResNet18AvgCustom(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.if_wide)
     initialize_resnet(model)
 
     if args.teacher_file is not None:
-        model_t = ResNet18AvgCustom("relu", [0, 0, 0], [0, 0, 0])
+        model_t = ResNet18AvgCustom("relu", [0, 0, 0], [0, 0, 0], args.if_wide)
         print(f"Loading teacher: {args.teacher_file}")     
         teacher_checkpoint = torch.load(args.teacher_file)
         model_t.load_state_dict(teacher_checkpoint["model_state_dict"], strict=False)
@@ -401,6 +401,8 @@ if __name__ == "__main__":
     parser.add_argument('--update_freq', default=1, type=int, help='gradient accumulation steps')
 
     parser.add_argument('--act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix'])
+
+    parser.add_argument('--if_wide', type=ast.literal_eval, default=False)
 
     
     # imagenet dataset arguments
