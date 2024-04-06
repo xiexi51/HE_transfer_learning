@@ -311,7 +311,7 @@ def process(pn, args):
                                       max_norm=None, update_freq=args.update_freq, model_ema=None, act_learn=act_learn)
 
         # if True or mask_end < 0.01:
-        if train_acc > 60:
+        if train_acc > 0.5:
             if mask is not None:
                 test_acc = ddp_test(args, testloader, model, epoch, best_acc, mask_end, writer, world_pn)
             else:
