@@ -105,6 +105,8 @@ class ResNetAvgCustom(nn.Module):
         out = self.relu1(out, mask)
         fms.append(out)
 
+        out = self.avgpool(out)
+
         layers = [self.layer1, self.layer2, self.layer3, self.layer4]
         for layer in layers:
             for block in layer:
