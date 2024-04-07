@@ -395,7 +395,7 @@ def vanillanet_5_avg_full_poly(act_relu_type, poly_weight_inits, poly_factors, i
 
 @register_model
 def vanillanet_6_avg_full_poly(act_relu_type, poly_weight_inits, poly_factors, if_shortcut, keep_bn, **kwargs):
-    model = VanillaNetAvgPoly(act_relu_type, poly_weight_inits, poly_factors, dims=[128*4, 256*4, 512*4, 1024*4, 1024*4], strides=[2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
+    model = VanillaNetAvgPoly(act_relu_type, poly_weight_inits, poly_factors, dims=[128, 256, 512, 1024, 1024], strides=[2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
     return model
 
 # @register_model
