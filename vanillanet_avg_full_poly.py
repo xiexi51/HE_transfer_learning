@@ -390,7 +390,7 @@ class VanillaNetAvgPoly(nn.Module):
 
 @register_model
 def vanillanet_5_avg_full_poly(act_relu_type, poly_weight_inits, poly_factors, if_shortcut, keep_bn, **kwargs):
-    model = VanillaNetAvgPoly(act_relu_type, poly_weight_inits, poly_factors, dims=[128*4, 256*4, 512*4, 1024*4], strides=[2,2,2], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
+    model = VanillaNetAvgPoly(act_relu_type, poly_weight_inits, poly_factors, dims=[128*2, 256*2, 512*2, 1024*2], strides=[2,2,2], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
     return model
 
 @register_model
@@ -398,10 +398,10 @@ def vanillanet_6_avg_full_poly(act_relu_type, poly_weight_inits, poly_factors, i
     model = VanillaNetAvgPoly(act_relu_type, poly_weight_inits, poly_factors, dims=[128*2, 256*2, 512*2, 1024*2, 1024*2], strides=[2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
     return model
 
-# @register_model
-# def vanillanet_7(pretrained=False,in_22k=False, **kwargs):
-#     model = VanillaNet(dims=[128*4, 128*4, 256*4, 512*4, 1024*4, 1024*4], strides=[1,2,2,2,1], **kwargs)
-#     return model
+@register_model
+def vanillanet_7_avg_full_poly(act_relu_type, poly_weight_inits, poly_factors, if_shortcut, keep_bn, **kwargs):
+    model = VanillaNetAvgPoly(act_relu_type, poly_weight_inits, poly_factors, dims=[128*2, 128*2, 256*2, 512*2, 1024*2, 1024*2], strides=[1,2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
+    return model
 
 # @register_model
 # def vanillanet_8(pretrained=False, in_22k=False, **kwargs):

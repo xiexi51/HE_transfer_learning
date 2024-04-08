@@ -16,8 +16,7 @@ import torch.distributed as dist
 from utils_dataset import build_imagenet_dataset
 from timm.data import Mixup
 from vanillanet_deploy_poly import VanillaNet_deploy_poly
-# from vanillanet_avg_full_poly import vanillanet_5_avg_full_poly, vanillanet_6_avg_full_poly, VanillaNetAvgPoly
-from vanillanet_avg_full_poly import vanillanet_6_avg_full_poly, VanillaNetAvgPoly
+from vanillanet_avg_full_poly import vanillanet_5_avg_full_poly, vanillanet_6_avg_full_poly, vanillanet_7_avg_full_poly, VanillaNetAvgPoly
 
 import timm
 from timm.utils import ModelEma
@@ -90,10 +89,17 @@ def process(pn, args):
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=1000 )
 
-    model = vanillanet_6_avg_full_poly(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.vanilla_shortcut, args.vanilla_keep_bn)
+    if args.v_type == 6:
+        vanillanet = vanillanet_6_avg_full_poly
+    elif args.v_type == 7:
+        vanillanet = vanillanet_7_avg_full_poly
+    else:
+        vanillanet = vanillanet_5_avg_full_poly
+
+    model = vanillanet(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.vanilla_shortcut, args.vanilla_keep_bn)
 
     if args.teacher_file is not None:
-        model_t = vanillanet_6_avg_full_poly("relu", [0, 0, 0], [0, 0, 0], if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
+        model_t = vanillanet("relu", [0, 0, 0], [0, 0, 0], if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
         print(f"Loading teacher: {args.teacher_file}")     
         teacher_checkpoint = torch.load(args.teacher_file)
         model_t.load_state_dict(teacher_checkpoint["model_state_dict"], strict=False)
@@ -406,6 +412,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix'])
 
+    parser.add_argument('--v_type', type=int, default=5, choices = [5, 6, 7])
     
     # imagenet dataset arguments
     parser.add_argument('--color_jitter', type=float, default=0.4, metavar='PCT', help='Color jitter factor (default: 0.4)')
