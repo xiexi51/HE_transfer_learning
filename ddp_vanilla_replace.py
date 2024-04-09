@@ -1,4 +1,5 @@
 import os
+import timm.optim
 import torch
 import torch.optim as optim
 import argparse
@@ -171,12 +172,25 @@ def process(pn, args):
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = DistributedDataParallel(model, device_ids=[pn])
 
-    assigner = None
+    relu_weights = []
+    other_params = []
+    for name, param in model.module.named_parameters():
+        if name.endswith('.relu.weight'):
+            relu_weights.append(param)
+        else:
+            other_params.append(param)
+    
+    optimizer_param_groups = [
+        {'params': other_params, 'lr': args.lr}, 
+        {'params': relu_weights, 'lr': args.lr * args.lr_relu_factor}
+    ]
 
-    optimizer = create_optimizer(
-        args, model.module, skip_list=None,
-        get_num_layer=assigner.get_layer_id if assigner is not None else None, 
-        get_layer_scale=assigner.get_scale if assigner is not None else None)
+    if args.optim == 'sgd':
+        optimizer = optim.SGD(optimizer_param_groups, momentum=args.momentum, nesterov=True)
+    elif args.optim == 'adamw':
+        optimizer = optim.AdamW(optimizer_param_groups)
+    else:
+        optimizer = timm.optim.lamb.Lamb(optimizer_param_groups)
 
     if args.lookahead:
         optimizer = timm.optim.lookahead.Lookahead(optimizer)
@@ -190,6 +204,17 @@ def process(pn, args):
             lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.lr_anneal_tmax)
 
     assert not(lr_scheduler is not None and args.lr_step_size > 0), "should not use both lr_anneal and lr_step"
+
+    def clamp_gradients_hook(grad):
+        norm = torch.norm(grad, p=2)
+        if norm > args.relu_grad_max_norm:
+            grad = grad / norm * args.relu_grad_max_norm
+        return grad
+    
+    if args.relu_grad_max_norm != -1:
+        for name, param in model.module.named_parameters():
+            if name.endswith('.relu.weight'):
+                param.register_hook(clamp_gradients_hook)
 
     if mixup_fn is not None:
         if args.bce_loss:
@@ -317,9 +342,11 @@ def process(pn, args):
                 print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
         
         omit_fms = 0
-        train_acc = ddp_vanilla_train(args=args, trainloader=trainloader, model_s=model, model_t=model_t, optimizer=optimizer, epoch=epoch, 
+        train_acc, avg_l2_norm = ddp_vanilla_train(args=args, trainloader=trainloader, model_s=model, model_t=model_t, optimizer=optimizer, epoch=epoch, 
                                       mask=mask, writer=writer, world_pn=world_pn, omit_fms=omit_fms, mixup_fn=mixup_fn, criterion_ce=criterion_ce, 
                                       max_norm=None, update_freq=args.update_freq, model_ema=None, act_learn=act_learn)
+        
+        print('avg_l2_norm = ', avg_l2_norm)
 
         if True or mask_end < 0.01:
             if mask is not None:
@@ -415,6 +442,10 @@ if __name__ == "__main__":
     parser.add_argument('--v_type', type=int, default=5, choices = [5, 6, 7])
 
     parser.add_argument('--clamp_poly_weight_ge0', type=ast.literal_eval, default=True)
+
+    parser.add_argument('--relu_grad_max_norm', type=float, default=-1)
+
+    parser.add_argument('--lr_relu_factor', type=float, default=1)
     
     # imagenet dataset arguments
     parser.add_argument('--color_jitter', type=float, default=0.4, metavar='PCT', help='Color jitter factor (default: 0.4)')

@@ -36,6 +36,9 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
     train_loss_ce = 0
     train_loss_fm = 0
 
+    total_l2_norm = 0.0
+    param_count = 0
+
     if args.pbar and world_pn == 0:
         if act_learn is not None:
             desc = f"{epoch} Lr{optimizer.param_groups[0]['lr']:.2e} act{act_learn:.2f}"
@@ -177,6 +180,12 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                             param.data[:, 0] = torch.clamp(param.data[:, 0], min=0)
                             param.data[:, 1] = torch.clamp(param.data[:, 1], min=0)
 
+            for name, param in model_s.module.named_parameters():
+                if name.endswith('.relu.weight') and param.grad is not None:
+                    l2_norm = torch.norm(param.grad, p=2)
+                    total_l2_norm += l2_norm.item()
+                    param_count += 1
+
             optimizer.zero_grad() 
             accumulated_batches = 0 
             if model_ema is not None:
@@ -198,7 +207,9 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
         writer.add_scalar('Loss_fm/train', train_loss_fm/total, epoch)
         writer.add_scalar('Loss_kd/train', train_loss_kd/total, epoch)
         writer.add_scalar('Loss_ce/train', train_loss_ce/total, epoch)
-    return train_acc
+
+    avg_l2_norm = total_l2_norm / param_count if param_count > 0 else 0
+    return train_acc, avg_l2_norm
         
 def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, world_pn):
     model.eval()
