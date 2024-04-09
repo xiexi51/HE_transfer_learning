@@ -171,12 +171,14 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
         if accumulated_batches == update_freq:
             mask_current += mask_iter
             
-            if args.relu_grad_max_norm != -1:
-                for name, param in model_s.module.named_parameters():
-                    if name.endswith('.relu.weight') and param.grad is not None:
-                        norm = torch.norm(param.grad.data, p=2)
-                        if norm > args.relu_grad_max_norm:
-                            param.grad.data = param.grad.data * args.relu_grad_max_norm / norm
+            for name, param in model_s.module.named_parameters():
+                if name.endswith('.relu.weight') and param.grad is not None:
+                    norm = torch.norm(param.grad.data, p=2).item()
+                    if args.relu_grad_max_norm != -1 and norm > args.relu_grad_max_norm :
+                        param.grad.data = param.grad.data * args.relu_grad_max_norm / norm
+                        norm = args.relu_grad_max_norm
+                    total_l2_norm += norm
+                    param_count += 1
 
             scaler.step(optimizer) 
             scaler.update() 
@@ -186,13 +188,7 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                     if name.endswith('.relu.weight'):
                         with torch.no_grad():
                             param.data[:, 0] = torch.clamp(param.data[:, 0], min=0)
-                            param.data[:, 1] = torch.clamp(param.data[:, 1], min=0)
-
-            for name, param in model_s.module.named_parameters():
-                if name.endswith('.relu.weight') and param.grad is not None:
-                    l2_norm = torch.norm(param.grad, p=2)
-                    total_l2_norm += l2_norm.item()
-                    param_count += 1
+                            param.data[:, 1] = torch.clamp(param.data[:, 1], min=0)        
 
             optimizer.zero_grad() 
             accumulated_batches = 0 
