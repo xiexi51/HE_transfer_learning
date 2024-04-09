@@ -171,7 +171,7 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
             scaler.update() 
 
             if args.clamp_poly_weight_ge0:
-                for name, param in model_s.named_parameters():
+                for name, param in model_s.module.named_parameters():
                     if name.endswith('.relu.weight'):
                         with torch.no_grad():
                             param.data[:, 0] = torch.clamp(param.data[:, 0], min=0)
