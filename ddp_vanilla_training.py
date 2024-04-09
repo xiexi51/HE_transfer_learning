@@ -169,6 +169,14 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
             mask_current += mask_iter
             scaler.step(optimizer) 
             scaler.update() 
+
+            if args.clamp_poly_weight_ge0:
+                for name, param in model_s.named_parameters():
+                    if name.endswith('.relu.weight'):
+                        with torch.no_grad():
+                            param.data[:, 0] = torch.clamp(param.data[:, 0], min=0)
+                            param.data[:, 1] = torch.clamp(param.data[:, 1], min=0)
+
             optimizer.zero_grad() 
             accumulated_batches = 0 
             if model_ema is not None:

@@ -413,6 +413,8 @@ if __name__ == "__main__":
     parser.add_argument('--act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix'])
 
     parser.add_argument('--v_type', type=int, default=5, choices = [5, 6, 7])
+
+    parser.add_argument('--clamp_poly_weight_ge0', type=ast.literal_eval, default=True)
     
     # imagenet dataset arguments
     parser.add_argument('--color_jitter', type=float, default=0.4, metavar='PCT', help='Color jitter factor (default: 0.4)')
