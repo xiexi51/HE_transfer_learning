@@ -170,6 +170,14 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
 
         if accumulated_batches == update_freq:
             mask_current += mask_iter
+            
+            if args.relu_grad_max_norm != -1:
+                for name, param in model_s.module.named_parameters():
+                    if name.endswith('.relu.weight') and param.grad is not None:
+                        norm = torch.norm(param.grad.data, p=2)
+                        if norm > args.relu_grad_max_norm:
+                            param.grad.data = param.grad.data * args.relu_grad_max_norm / norm
+
             scaler.step(optimizer) 
             scaler.update() 
 

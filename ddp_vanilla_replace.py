@@ -205,17 +205,6 @@ def process(pn, args):
 
     assert not(lr_scheduler is not None and args.lr_step_size > 0), "should not use both lr_anneal and lr_step"
 
-    def clamp_gradients_hook(grad):
-        norm = torch.norm(grad, p=2)
-        if norm > args.relu_grad_max_norm:
-            grad = grad / norm * args.relu_grad_max_norm
-        return grad
-    
-    if args.relu_grad_max_norm != -1:
-        for name, param in model.module.named_parameters():
-            if name.endswith('.relu.weight'):
-                param.register_hook(clamp_gradients_hook)
-
     if mixup_fn is not None:
         if args.bce_loss:
             criterion_ce = BinaryCrossEntropy(target_threshold=args.bce_target_thresh)
@@ -441,7 +430,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--v_type', type=int, default=5, choices = [5, 6, 7])
 
-    parser.add_argument('--clamp_poly_weight_ge0', type=ast.literal_eval, default=True)
+    parser.add_argument('--clamp_poly_weight_ge0', type=ast.literal_eval, default=False)
 
     parser.add_argument('--relu_grad_max_norm', type=float, default=-1)
 
