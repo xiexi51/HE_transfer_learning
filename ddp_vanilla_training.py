@@ -187,8 +187,9 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                 for name, param in model_s.module.named_parameters():
                     if name.endswith('.relu.weight'):
                         with torch.no_grad():
-                            param.data[:, 0] = torch.clamp(param.data[:, 0], min=0)
-                            param.data[:, 1] = torch.clamp(param.data[:, 1], min=0)        
+                            param.data[:, 0] = torch.clamp(param.data[:, 0], min=args.poly_weight_min[0], max=args.poly_weight_max[0])
+                            param.data[:, 1] = torch.clamp(param.data[:, 1], min=args.poly_weight_min[1], max=args.poly_weight_max[1])
+                            param.data[:, 2] = torch.clamp(param.data[:, 2], min=args.poly_weight_min[2], max=args.poly_weight_max[2])
 
             optimizer.zero_grad() 
             accumulated_batches = 0 
