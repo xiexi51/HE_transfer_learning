@@ -430,7 +430,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--v_type', type=int, default=5, choices = [5, 6, 7])
 
-    parser.add_argument('--clamp_poly_weight_ge0', type=ast.literal_eval, default=False)
+    parser.add_argument('--clamp_poly_weight', type=ast.literal_eval, default=True)
 
     parser.add_argument('--relu_grad_max_norm', type=float, default=-1)
 
