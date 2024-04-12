@@ -20,11 +20,10 @@ def set_forward_with_fms(model, if_forward_with_fms):
     else:
         model.if_forward_with_fms = if_forward_with_fms
 
-
 def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Module, model_t: torch.nn.Module, optimizer: torch.optim.Optimizer, 
               epoch: int, mask: Tuple[float, float], writer: SummaryWriter, world_pn: int, omit_fms: int, mixup_fn: Mixup, criterion_ce: torch.nn.Module, 
               max_norm: float, update_freq: int, model_ema: List[ModelEma], act_learn: float):
-    #model_s.eval()
+    # model_s.eval()
 
     model_s.train()
 
@@ -62,6 +61,9 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
         loss_fm_fun = custom_mse_loss
     else:
         loss_fm_fun = at_loss
+
+    mse_loss = nn.MSELoss()
+    ce_loss = nn.CrossEntropyLoss()
     
     criterion_kd = SoftTarget(4.0).cuda()
 
@@ -105,22 +107,52 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
             x, y = mixup_fn(x, y)
         
         with torch.cuda.amp.autocast(enabled=args.use_amp, dtype=amp_dtype):
-            if model_t is not None and (args.loss_fm_factor > 0 or args.loss_kd_factor > 0):
+            if model_t is not None and (args.loss_conv_prune_factor > 0 or args.loss_fm_factor > 0 or args.loss_kd_factor > 0):
                 with torch.no_grad():
                     set_forward_with_fms(model_t, True)
-                    out_t, fms_t = model_t((x, -1))
+                    if args.loss_conv_prune_factor > 0:
+                        out_t, fms_t, featuremap_t = model_t((x, 0))
+                    else:
+                        out_t, fms_t, featuremap_t = model_t((x, -1))
 
-            if args.loss_fm_factor > 0:
+            # if model_t.state_dict().keys() != model_s.module.state_dict().keys():
+            #     print(f'key not same!')
+
+            # for key in model_t.state_dict():
+            #     if not torch.equal(model_t.state_dict()[key], model_s.module.state_dict()[key]):
+            #         print(f'{key}')
+
+
+            if args.loss_conv_prune_factor > 0:
                 set_forward_with_fms(model_s, True)
-                out_s, fms_s = model_s((x, mask_current))
-            else:
-                set_forward_with_fms(model_s, False)
                 if mask is not None:
-                    out_s = model_s((x, mask_current))
+                    out_s, fms_s, featuremap_s = model_s((x, mask_current))
                 else:
-                    out_s = model_s(x)
+                    out_s, featuremap_s = model_s(x)
+                
+                total_conv, active_conv = model_s.module.get_conv_density()
+
+            else:
+                if args.loss_fm_factor > 0:
+                    set_forward_with_fms(model_s, True)
+                    out_s, fms_s, _ = model_s((x, mask_current))
+                else:
+                    set_forward_with_fms(model_s, False)
+                    if mask is not None:
+                        out_s, _ = model_s((x, mask_current))
+                    else:
+                        out_s, _ = model_s(x)
         
             loss = 0
+
+            if args.loss_conv_prune_factor > 0:
+                active_conv_rate = active_conv / total_conv
+                loss += active_conv_rate * args.loss_conv_prune_factor
+                loss_kd = loss_fm_fun(featuremap_s, featuremap_t) * 1000
+                loss += loss_kd
+                train_loss_kd += loss_kd.item()
+            else:
+                active_conv_rate = 1
 
             if args.loss_fm_factor > 0:
                 loss_fm = sum(loss_fm_fun(x, y) for x, y in zip(fms_s[omit_fms:], fms_t[omit_fms:])) * args.loss_fm_factor
@@ -166,7 +198,7 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
         if args.pbar and world_pn == 0:
             # print(total, top1_total, top5_total)
             # print(reduced_total, reduced_top1_total, reduced_top5_total)
-            pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e}, 1a {100*reduced_top1_total/reduced_total:.1f}, 5a -, m{mask_current:.4f}")
+            pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e},conv{active_conv_rate:.3f} 1a {100*reduced_top1_total/reduced_total:.1f}, 5a -, m{mask_current:.4f}")
 
         if accumulated_batches == update_freq:
             mask_current += mask_iter
@@ -179,6 +211,8 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                         norm = args.relu_grad_max_norm
                     total_l2_norm += norm
                     param_count += 1
+                if name.endswith('weight_aux') and param.grad is not None:
+                    param.grad.data *= 1
 
             scaler.step(optimizer) 
             scaler.update() 
@@ -240,9 +274,9 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, world_pn):
             with torch.no_grad():
                 set_forward_with_fms(model, False)
                 if mask is not None:
-                    out = model((x, mask))
+                    out, _ = model((x, mask))
                 else:
-                    out = model(x)
+                    out, _ = model(x)
         top1, top5 = accuracy(out, y, topk=(1, 5))
         top1_total += top1[0] * x.size(0)
         top5_total += top5[0] * x.size(0)
@@ -294,9 +328,9 @@ def single_test(args, testloader, model, epoch, best_acc, mask):
             else:
                 model.if_forward_with_fms = False
             if mask is not None:
-                out = model((x, mask))
+                out, _, _ = model((x, mask))
             else:
-                out= model(x)
+                out, _, _ = model(x)
         top1, top5 = accuracy(out, y, topk=(1, 5))
         top1_total += top1[0] * x.size(0)
         top5_total += top5[0] * x.size(0)

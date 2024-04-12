@@ -102,18 +102,30 @@ def process(pn, args):
             vanillanet = vanillanet_5_avg_full_poly
         model = vanillanet(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.vanilla_shortcut, args.vanilla_keep_bn)
     else:
-        model = ResNet18AvgCustom(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.if_wide)
+        model = ResNet18AvgCustom(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.if_wide, args.prune_type)
+        if args.freeze_linear:
+            for param in model.linear.parameters():
+                param.requires_grad = False
         initialize_resnet(model)
 
     if args.teacher_file is not None:
         if args.v_type <= 7 and args.v_type >= 5:
             model_t = vanillanet("relu", [0, 0, 0], [0, 0, 0], if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
         else:
-            model_t = ResNet18AvgCustom("relu", [0, 0, 0], [0, 0, 0], args.if_wide)
-
+            if args.loss_conv_prune_factor > 0:
+                model_t = ResNet18AvgCustom("channel", [0, 0, 0], [0, 0, 0], args.if_wide, "None")
+            else:
+                model_t = ResNet18AvgCustom("relu", [0, 0, 0], [0, 0, 0], args.if_wide, "None")
+            
         print(f"Loading teacher: {args.teacher_file}")     
-        teacher_checkpoint = torch.load(args.teacher_file)
-        model_t.load_state_dict(teacher_checkpoint["model_state_dict"], strict=False)
+        state_dict = torch.load(args.teacher_file)['model_state_dict']
+        new_state_dict = {}
+        for key, value in state_dict.items():
+            new_key = re.sub(r'layer(\d+)_(\d+)', r'layer\1.\2', key)
+            new_key = re.sub(r'(\.relu)(\d+)\.', r'\1\2.relu.', new_key)
+            new_key = re.sub(r'(^relu)(\d+)\.', r'\1\2.relu.', new_key)
+            new_state_dict[new_key] = value
+        model_t.load_state_dict(new_state_dict, strict=False)
     else:
         model_t = None
     
@@ -152,8 +164,14 @@ def process(pn, args):
     if args.reload or args.resume:
         if checkpoint_path and os.path.exists(checkpoint_path):
             print(f"Loading checkpoint: {checkpoint_path}")
-            checkpoint = torch.load(checkpoint_path)
-            model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+            state_dict = torch.load(checkpoint_path)['model_state_dict']
+            new_state_dict = {}
+            for key, value in state_dict.items():
+                new_key = re.sub(r'layer(\d+)_(\d+)', r'layer\1.\2', key)
+                new_key = re.sub(r'(\.relu)(\d+)\.', r'\1\2.relu.', new_key)
+                new_key = re.sub(r'(^relu)(\d+)\.', r'\1\2.relu.', new_key)
+                new_state_dict[new_key] = value
+            model.load_state_dict(new_state_dict, strict=False)
         else:
             print(f"No checkpoint found at {checkpoint_path}")
 
@@ -293,7 +311,7 @@ def process(pn, args):
         
         if True or args.world_size > 1:
             # ddp_test(args, testloader, model_t, _test_epoch, best_acc, -1, writer, pn)
-            ddp_test(args, testloader, model, _test_epoch, best_acc, 1, writer, pn)
+            ddp_test(args, testloader, model, _test_epoch, best_acc, 0, writer, pn)
 
         # if isinstance(model.module, VanillaNet_deploy_poly):
         #     test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, -1, writer, pn)
@@ -451,6 +469,10 @@ if __name__ == "__main__":
     parser.add_argument('--lr_relu_factor', type=float, default=1)
 
     parser.add_argument('--if_wide', type=ast.literal_eval, default=False)
+
+    parser.add_argument('--prune_type', type=str, default="None", choices=['channel', 'pixel', 'None'])
+
+    parser.add_argument('--freeze_linear', type=ast.literal_eval, default=False)
     
     # imagenet dataset arguments
     parser.add_argument('--color_jitter', type=float, default=0.4, metavar='PCT', help='Color jitter factor (default: 0.4)')
@@ -511,6 +533,7 @@ if __name__ == "__main__":
     parser.add_argument('--act_learn_epochs', default=20, type=int)
     # parser.add_argument('--act_learn_mini_batch', type=ast.literal_eval, default=True)
 
+    parser.add_argument('--loss_conv_prune_factor', default=0, type=float)
 
     parser.add_argument('--loss_fm_type', type=str, default='at', choices = ['at', 'mse', 'custom_mse'], help='the type for the feature map loss')
     parser.add_argument('--loss_fm_factor', default=100, type=float, help='the factor of the feature map loss, set to 0 to disable')
