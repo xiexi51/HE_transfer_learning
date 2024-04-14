@@ -22,7 +22,7 @@ def set_forward_with_fms(model, if_forward_with_fms):
 
 def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Module, model_t: torch.nn.Module, optimizer: torch.optim.Optimizer, 
               epoch: int, mask: Tuple[float, float], writer: SummaryWriter, world_pn: int, omit_fms: int, mixup_fn: Mixup, criterion_ce: torch.nn.Module, 
-              max_norm: float, update_freq: int, model_ema: List[ModelEma], act_learn: float):
+              max_norm: float, update_freq: int, model_ema: List[ModelEma], act_learn: float, threshold_end: float):
     # model_s.eval()
 
     model_s.train()
@@ -111,9 +111,9 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                 with torch.no_grad():
                     set_forward_with_fms(model_t, True)
                     if args.loss_conv_prune_factor > 0:
-                        out_t, fms_t, featuremap_t = model_t((x, 0))
+                        out_t, fms_t, featuremap_t = model_t((x, 0, 1))
                     else:
-                        out_t, fms_t, featuremap_t = model_t((x, -1))
+                        out_t, fms_t, featuremap_t = model_t((x, -1, 1))
 
             # if model_t.state_dict().keys() != model_s.module.state_dict().keys():
             #     print(f'key not same!')
@@ -126,7 +126,7 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
             if args.loss_conv_prune_factor > 0:
                 set_forward_with_fms(model_s, True)
                 if mask is not None:
-                    out_s, fms_s, featuremap_s = model_s((x, mask_current))
+                    out_s, fms_s, featuremap_s = model_s((x, mask_current, threshold_end))
                 else:
                     out_s, featuremap_s = model_s(x)
                 
@@ -135,20 +135,20 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
             else:
                 if args.loss_fm_factor > 0:
                     set_forward_with_fms(model_s, True)
-                    out_s, fms_s, _ = model_s((x, mask_current))
+                    out_s, fms_s, featuremap_s = model_s((x, mask_current, threshold_end))
                 else:
                     set_forward_with_fms(model_s, False)
                     if mask is not None:
-                        out_s, _ = model_s((x, mask_current))
+                        out_s, featuremap_s = model_s((x, mask_current, threshold_end))
                     else:
-                        out_s, _ = model_s(x)
+                        out_s, featuremap_s = model_s(x)
         
             loss = 0
 
             if args.loss_conv_prune_factor > 0:
                 active_conv_rate = active_conv / total_conv
                 loss += active_conv_rate * args.loss_conv_prune_factor
-                loss_kd = loss_fm_fun(featuremap_s, featuremap_t) * 1000
+                loss_kd = criterion_kd(featuremap_s, featuremap_t) * 1
                 loss += loss_kd
                 train_loss_kd += loss_kd.item()
             else:
@@ -159,7 +159,8 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                 loss += loss_fm
                 train_loss_fm += loss_fm.item()
             if args.loss_kd_factor > 0:
-                loss_kd = criterion_kd(out_s, out_t) * args.loss_kd_factor
+                # loss_kd = criterion_kd(out_s, out_t) * args.loss_kd_factor
+                loss_kd = criterion_kd(featuremap_s, featuremap_t) * args.loss_kd_factor
                 loss += loss_kd
                 train_loss_kd += loss_kd.item()
 
@@ -250,7 +251,7 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
     avg_l2_norm = total_l2_norm / param_count if param_count > 0 else 0
     return train_acc, avg_l2_norm
         
-def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, world_pn):
+def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, world_pn, threshold):
     model.eval()
     top1_total = 0
     top5_total = 0
@@ -274,7 +275,7 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, world_pn):
             with torch.no_grad():
                 set_forward_with_fms(model, False)
                 if mask is not None:
-                    out, _ = model((x, mask))
+                    out, _ = model((x, mask, threshold))
                 else:
                     out, _ = model(x)
         top1, top5 = accuracy(out, y, topk=(1, 5))

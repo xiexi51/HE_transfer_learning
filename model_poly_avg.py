@@ -32,13 +32,18 @@ class Conv2dPruned(nn.Conv2d):
             self.weight_aux = nn.Parameter(torch.rand_like(self.weight))
         elif self.prune_type == "channel":
             self.weight_aux = nn.Parameter(torch.rand(out_channels))
+        elif self.prune_type == "fixed_channel":
+            self.weight_aux = nn.Parameter(torch.rand(out_channels), requires_grad=False)
 
-    def forward(self, x):
+    def forward(self, x, threshold):
         if self.prune_type == "pixel":
             mask = STEFunction.apply(self.weight_aux)
         elif self.prune_type == "channel":
             mask = STEFunction.apply(self.weight_aux)
             mask = mask.view(-1, 1, 1, 1).expand_as(self.weight)
+        elif self.prune_type == "fixed_channel":
+            mask = (threshold > self.weight_aux).float() 
+            mask = mask.view(-1, 1, 1, 1).expand_as(self.weight) 
         else:
             mask = 1
         pruned_weight = self.weight * mask
@@ -70,16 +75,22 @@ class BasicBlockAvgCustom(nn.Module):
         self.relu1 = custom_relu(relu_type, poly_weight_inits, poly_factors, planes)
         self.relu2 = custom_relu(relu_type, poly_weight_inits, poly_factors, planes)
 
-    def forward(self, x, mask):
+    def forward(self, x, mask, threshold):
         fms = []
-        out = self.conv1(x)
+        out = self.conv1(x, threshold)
+        if len(self.shortcut._modules) > 0:
+            shortcut = self.shortcut[0](x, threshold)
+            shortcut = self.shortcut[1](shortcut)
+        else:
+            shortcut = self.shortcut(x)
+
         out = self.bn1(out)
         out = self.relu1(out, mask)
         fms.append(out)
         
-        out = self.conv2(out)
+        out = self.conv2(out, threshold)
         out = self.bn2(out)
-        out += self.shortcut(x)
+        out += shortcut
         out = self.relu2(out, mask)
         fms.append(out)
         return out, fms
@@ -138,12 +149,12 @@ class ResNetAvgCustom(nn.Module):
             self.in_planes = planes * block.expansion
         return nn.Sequential(*blocks)
         
-    def forward(self, x_and_mask):
-        x, mask = x_and_mask
+    def forward(self, x_mask_threshold):
+        x, mask, threshold = x_mask_threshold
 
         fms = []
         
-        out = self.conv1(x)
+        out = self.conv1(x, threshold)
         out = self.bn1(out)
         out = self.relu1(out, mask)
         fms.append(out)
@@ -153,7 +164,7 @@ class ResNetAvgCustom(nn.Module):
         layers = [self.layer1, self.layer2, self.layer3, self.layer4]
         for layer in layers:
             for block in layer:
-                out, _fms = block(out, mask)
+                out, _fms = block(out, mask, threshold)
                 fms += _fms
 
         featuremap = out

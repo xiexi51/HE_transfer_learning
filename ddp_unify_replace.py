@@ -72,6 +72,7 @@ def process(pn, args):
 
     mask_provider = MaskProvider(args.mask_decrease, args.mask_epochs)
     act_learn_provider = MaskProvider(args.act_learn_increase, args.act_learn_epochs)
+    threshold_provider = MaskProvider(args.threshold_decrease, args.threshold_epochs)
 
     print("gpu count =", torch.cuda.device_count())
     
@@ -130,7 +131,7 @@ def process(pn, args):
         model_t = None
     
     dummy_input = torch.rand(10, 3, 224, 224) 
-    model((dummy_input, 0))
+    model((dummy_input, 0, 1))
 
     if args.v_type <= 7 and args.v_type >= 5:
         if isinstance(model, VanillaNet_deploy_poly):
@@ -311,7 +312,7 @@ def process(pn, args):
         
         if True or args.world_size > 1:
             # ddp_test(args, testloader, model_t, _test_epoch, best_acc, -1, writer, pn)
-            ddp_test(args, testloader, model, _test_epoch, best_acc, 0, writer, pn)
+            ddp_test(args, testloader, model, _test_epoch, best_acc, 0, writer, pn, 1)
 
         # if isinstance(model.module, VanillaNet_deploy_poly):
         #     test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, -1, writer, pn)
@@ -339,6 +340,8 @@ def process(pn, args):
         train_sampler.set_epoch(epoch)
         mask = mask_provider.get_mask(epoch)
         mask_begin, mask_end = mask
+        threshold = threshold_provider.get_mask(epoch)
+        threshold_begin, threshold_end = threshold
 
         # if not args.deploy:
         #     act_learn_begin, act_learn_end = act_learn_provider.get_mask(epoch)
@@ -356,6 +359,8 @@ def process(pn, args):
             if mask is not None:
                 print("mask = ", mask)
                 writer.add_scalar('mask_end value', mask_end, epoch)
+                print("threshold = ", threshold)
+                writer.add_scalar('threshold_end value', threshold_end, epoch)
             if isinstance(model.module, VanillaNetAvgPoly) and args.act_relu_type != "relu" and args.pixel_wise:
                 total_elements, relu_elements = model.module.get_relu_density(mask_end)
                 print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
@@ -363,15 +368,15 @@ def process(pn, args):
         omit_fms = 0
         train_acc, avg_l2_norm = ddp_vanilla_train(args=args, trainloader=trainloader, model_s=model, model_t=model_t, optimizer=optimizer, epoch=epoch, 
                                       mask=mask, writer=writer, world_pn=world_pn, omit_fms=omit_fms, mixup_fn=mixup_fn, criterion_ce=criterion_ce, 
-                                      max_norm=None, update_freq=args.update_freq, model_ema=None, act_learn=act_learn)
+                                      max_norm=None, update_freq=args.update_freq, model_ema=None, act_learn=act_learn, threshold_end=threshold_end)
         
         print('avg_l2_norm = ', avg_l2_norm)
 
         if True or mask_end < 0.01:
             if mask is not None:
-                test_acc = ddp_test(args, testloader, model, epoch, best_acc, mask_end, writer, world_pn)
+                test_acc = ddp_test(args, testloader, model, epoch, best_acc, mask_end, writer, world_pn, threshold_end)
             else:
-                test_acc = ddp_test(args, testloader, model, epoch, best_acc, None, writer, world_pn)
+                test_acc = ddp_test(args, testloader, model, epoch, best_acc, None, writer, world_pn, threshold_end)
 
         if pn == 0:
             with open(f"{log_dir}/acc.txt", 'a') as file:
@@ -470,7 +475,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--if_wide', type=ast.literal_eval, default=False)
 
-    parser.add_argument('--prune_type', type=str, default="None", choices=['channel', 'pixel', 'None'])
+    parser.add_argument('--prune_type', type=str, default="None", choices=['channel', 'pixel', 'fixed_channel', 'None'])
 
     parser.add_argument('--freeze_linear', type=ast.literal_eval, default=False)
     
@@ -534,6 +539,10 @@ if __name__ == "__main__":
     # parser.add_argument('--act_learn_mini_batch', type=ast.literal_eval, default=True)
 
     parser.add_argument('--loss_conv_prune_factor', default=0, type=float)
+
+    parser.add_argument('--threshold', default=1, type=float)
+    parser.add_argument('--threshold_decrease', default='linear', type=str, choices = ['0', '1', '1-sinx', 'e^(-x/10)', 'linear'])
+    parser.add_argument('--threshold_epochs', default=50, type=int)
 
     parser.add_argument('--loss_fm_type', type=str, default='at', choices = ['at', 'mse', 'custom_mse'], help='the type for the feature map loss')
     parser.add_argument('--loss_fm_factor', default=100, type=float, help='the factor of the feature map loss, set to 0 to disable')
