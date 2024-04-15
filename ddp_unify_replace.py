@@ -366,7 +366,7 @@ def process(pn, args):
             if mask is not None:
                 print("mask = ", mask)
                 writer.add_scalar('mask_end value', mask_end, epoch)
-                print("threshold = ", threshold)
+                print("threshold_end = ", threshold_end)
                 writer.add_scalar('threshold_end value', threshold_end, epoch)
             if isinstance(model.module, VanillaNetAvgPoly) and args.act_relu_type != "relu" and args.pixel_wise:
                 total_elements, relu_elements = model.module.get_relu_density(mask_end)
