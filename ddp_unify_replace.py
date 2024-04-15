@@ -486,6 +486,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--freeze_linear', type=ast.literal_eval, default=False)
     parser.add_argument('--freeze_relu', type=ast.literal_eval, default=False)
+    parser.add_argument('--student_eval', type=ast.literal_eval, default=False)
     parser.add_argument('--threshold_min', type=float, default=0)
     
     # imagenet dataset arguments

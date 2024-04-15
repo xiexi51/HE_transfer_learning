@@ -23,9 +23,10 @@ def set_forward_with_fms(model, if_forward_with_fms):
 def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Module, model_t: torch.nn.Module, optimizer: torch.optim.Optimizer, 
               epoch: int, mask: Tuple[float, float], writer: SummaryWriter, world_pn: int, omit_fms: int, mixup_fn: Mixup, criterion_ce: torch.nn.Module, 
               max_norm: float, update_freq: int, model_ema: List[ModelEma], act_learn: float, threshold_end: float):
-    # model_s.eval()
-
-    model_s.train()
+    if args.student_eval:
+        model_s.eval()
+    else:
+        model_s.train()
 
     if model_t is not None:
         model_t.eval()
