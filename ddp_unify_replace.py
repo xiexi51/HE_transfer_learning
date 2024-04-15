@@ -104,9 +104,6 @@ def process(pn, args):
         model = vanillanet(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.vanilla_shortcut, args.vanilla_keep_bn)
     else:
         model = ResNet18AvgCustom(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.if_wide, args.prune_type)
-        if args.freeze_linear:
-            for param in model.linear.parameters():
-                param.requires_grad = False
         initialize_resnet(model)
 
     if args.teacher_file is not None:
@@ -199,6 +196,14 @@ def process(pn, args):
                 ModelEma(model, decay=ema_decay, device='cpu' if args.model_ema_force_cpu else '', resume='')
             )
         print("Using EMA with decay = %s" % args.model_ema_decay)
+
+    if args.freeze_linear:
+        for param in model.linear.parameters():
+            param.requires_grad = False
+    if args.freeze_relu:
+        for name, param in model.named_parameters():
+            if name.endswith('.relu.weight'):
+                param.requires_grad = False
 
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = DistributedDataParallel(model, device_ids=[pn])
@@ -342,6 +347,8 @@ def process(pn, args):
         mask_begin, mask_end = mask
         threshold = threshold_provider.get_mask(epoch)
         threshold_begin, threshold_end = threshold
+        if threshold_end < args.threshold_min:
+            threshold_end = args.threshold_min
 
         # if not args.deploy:
         #     act_learn_begin, act_learn_end = act_learn_provider.get_mask(epoch)
@@ -478,6 +485,8 @@ if __name__ == "__main__":
     parser.add_argument('--prune_type', type=str, default="None", choices=['channel', 'pixel', 'fixed_channel', 'None'])
 
     parser.add_argument('--freeze_linear', type=ast.literal_eval, default=False)
+    parser.add_argument('--freeze_relu', type=ast.literal_eval, default=False)
+    parser.add_argument('--threshold_min', type=float, default=0)
     
     # imagenet dataset arguments
     parser.add_argument('--color_jitter', type=float, default=0.4, metavar='PCT', help='Color jitter factor (default: 0.4)')
