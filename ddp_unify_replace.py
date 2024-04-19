@@ -467,8 +467,8 @@ if __name__ == "__main__":
 
     parser.add_argument('--switch_to_deploy', type=ast.literal_eval, default=False)
 
-    parser.add_argument('--vanilla_shortcut', type=ast.literal_eval, default=False)
-    parser.add_argument('--vanilla_keep_bn', type=ast.literal_eval, default=False)
+    parser.add_argument('--vanilla_shortcut', type=ast.literal_eval, default=True)
+    parser.add_argument('--vanilla_keep_bn', type=ast.literal_eval, default=True)
 
     parser.add_argument('--update_freq', default=1, type=int, help='gradient accumulation steps')
 
@@ -502,8 +502,8 @@ if __name__ == "__main__":
     parser.add_argument('--recount', type=int, default=1, help='Random erase count (default: 1)')
 
     # Mixup params
-    parser.add_argument('--mixup', type=float, default=0.1, help='mixup alpha, mixup enabled if > 0.')
-    parser.add_argument('--cutmix', type=float, default=1.0, help='cutmix alpha, cutmix enabled if > 0.')
+    parser.add_argument('--mixup', type=float, default=0, help='mixup alpha, mixup enabled if > 0.')
+    parser.add_argument('--cutmix', type=float, default=0, help='cutmix alpha, cutmix enabled if > 0.')
     parser.add_argument('--cutmix_minmax', type=float, nargs='+', default=None, help='cutmix min/max ratio, overrides alpha and enables cutmix if set (default: None)')
     parser.add_argument('--mixup_prob', type=float, default=1.0, help='Probability of performing mixup or cutmix when either/both is enabled')
     parser.add_argument('--mixup_switch_prob', type=float, default=0.5, help='Probability of switching to cutmix when both mixup and cutmix enabled')
@@ -525,7 +525,7 @@ if __name__ == "__main__":
     # parser.add_argument('--decay_epochs', default=100, type=int, help='for deep training strategy')
     # parser.add_argument('--decay_linear', type=ast.literal_eval, default=True, help='cos/linear for decay manner')
 
-    parser.add_argument('--use_amp', type=ast.literal_eval, default=False, help="Use PyTorch's AMP (Automatic Mixed Precision) or not")
+    parser.add_argument('--use_amp', type=ast.literal_eval, default=True, help="Use PyTorch's AMP (Automatic Mixed Precision) or not")
     
     parser.add_argument('--bce_loss', type=ast.literal_eval, default=True, help='Enable BCE loss w/ Mixup/CutMix use.')
     parser.add_argument('--bce_target_thresh', type=float, default=None, help='Threshold for binarizing softened BCE targets (default: None, disabled)')
@@ -544,12 +544,12 @@ if __name__ == "__main__":
     parser.add_argument('--poly_weight_min', nargs=3, type=float, default=[0, 0, -0.4])
     parser.add_argument('--poly_weight_max', nargs=3, type=float, default=[0.6, 1.2, 0.6])
 
-    parser.add_argument('--mask_decrease', type=str, default='1-sinx', choices = ['0', '1', '1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
+    parser.add_argument('--mask_decrease', type=str, default='0', choices = ['0', '1', '1-sinx', 'e^(-x/10)', 'linear'], help='how the relu replacing mask decreases')
     parser.add_argument('--mask_epochs', default=6, type=int, help='the epoch that the relu replacing mask will decrease to 0')
-    parser.add_argument('--mask_mini_batch', type=ast.literal_eval, default=True, help='if enable mini batch mask decrease')
+    parser.add_argument('--mask_mini_batch', type=ast.literal_eval, default=False, help='if enable mini batch mask decrease')
 
-    parser.add_argument('--act_learn_increase', type=str, default='1-sinx', choices = ['0', '1', '1-sinx', 'e^(-x/10)', 'linear'])
-    parser.add_argument('--act_learn_epochs', default=20, type=int)
+    parser.add_argument('--act_learn_increase', type=str, default='1', choices = ['0', '1', '1-sinx', 'e^(-x/10)', 'linear'])
+    parser.add_argument('--act_learn_epochs', default=10000, type=int)
     # parser.add_argument('--act_learn_mini_batch', type=ast.literal_eval, default=True)
 
     parser.add_argument('--loss_conv_prune_factor', default=0, type=float)
@@ -566,9 +566,9 @@ if __name__ == "__main__":
     parser.add_argument('--lr_anneal', type=str, default='cos', choices = ['None', 'cos'])
     parser.add_argument('--lr_anneal_tmax', type=int, default=None)
     parser.add_argument('--lr_step_size', type=int, default=0, help="decrease lr every step-size epochs")
-    parser.add_argument('--lr_gamma', type=float, default=0.1, help="decrease lr by a factor of lr-gamma")
+    parser.add_argument('--lr_gamma', type=float, default=0.3, help="decrease lr by a factor of lr-gamma")
 
-    parser.add_argument('--bf16', type=ast.literal_eval, default=False, help='if enable training with bf16 precision')
+    parser.add_argument('--bf16', type=ast.literal_eval, default=True, help='if enable training with bf16 precision')
 
     # parser.add_argument('--fp16', type=ast.literal_eval, default=False, help='if enable training with float16 precision')
     
