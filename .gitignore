@@ -7,3 +7,5 @@ locals.py
 *.tar.gz
 tmp*
 ip_list
+/save_*
+/success_*

@@ -30,6 +30,7 @@ from locals import proj_root
 import subprocess
 import glob
 import setproctitle
+import sys
 
 cse_gateway_login = "xix22010@137.99.0.102"
 a6000_login = "xix22010@192.168.10.16"
@@ -279,7 +280,9 @@ def process(pn, args):
         with open(args_file, 'w') as file:
             for key, value in vars(args).items():
                 file.write(f'{key}: {value}\n')
-        # print(f"Arguments saved in {args_file}")
+        cmd_file = os.path.join(log_dir, "cmd.txt")
+        with open(cmd_file, 'w') as file:
+            file.write(args.cmd)
         writer = SummaryWriter(log_dir=log_dir)
     else:
         writer = None
@@ -287,6 +290,7 @@ def process(pn, args):
     if world_pn == 0 and args.copy_to_a6000:
         slience_cmd(f"ssh {ssh_options} {a6000_login} 'mkdir -p {a6000_log_dir}'")
         copy_to_a6000(args_file, os.path.join(a6000_log_dir, "args.txt"))
+        copy_to_a6000(cmd_file, os.path.join(a6000_log_dir, "cmd.txt"))
         slience_cmd(f"ssh {ssh_options} {a6000_login} 'mkdir -p {a6000_log_dir}/src'")
         slience_cmd(f"scp {ssh_options} ./*.py {a6000_login}:{a6000_log_dir}/src/")
     
@@ -628,6 +632,9 @@ if __name__ == "__main__":
                 print("use fp16")
         else:
             print("use full precision")
+
+    command_line = ' '.join([os.path.basename(sys.argv[0])] + sys.argv[1:])
+    args.cmd = f"python {command_line}"
 
     mp.spawn(process, nprocs=args.node_gpu_count, args=(args, ))
     
