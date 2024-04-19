@@ -107,7 +107,7 @@ def process(pn, args):
         model = ResNet18AvgCustom(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.if_wide, args.prune_type)
         initialize_resnet(model)
 
-    if args.teacher_file is not None:
+    if args.teacher_file is not None and args.teacher_file != 'None':
         if args.v_type <= 7 and args.v_type >= 5:
             model_t = vanillanet("relu", [0, 0, 0], [0, 0, 0], if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
         else:
