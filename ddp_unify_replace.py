@@ -30,6 +30,7 @@ from locals import proj_root
 import subprocess
 import glob
 import setproctitle
+import sys
 
 cse_gateway_login = "xix22010@137.99.0.102"
 a6000_login = "xix22010@192.168.10.16"
@@ -111,9 +112,9 @@ def process(pn, args):
             model_t = vanillanet("relu", [0, 0, 0], [0, 0, 0], if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
         else:
             if args.loss_conv_prune_factor > 0:
-                model_t = ResNet18AvgCustom("channel", [0, 0, 0], [0, 0, 0], args.if_wide, "None")
+                model_t = ResNet18AvgCustom(args.act_relu_type, [0, 0, 0], [0, 0, 0], args.if_wide, "None")
             else:
-                model_t = ResNet18AvgCustom("relu", [0, 0, 0], [0, 0, 0], args.if_wide, "None")
+                model_t = ResNet18AvgCustom(args.act_relu_type, [0, 0, 0], [0, 0, 0], args.if_wide, "None")
             
         print(f"Loading teacher: {args.teacher_file}")     
         state_dict = torch.load(args.teacher_file)['model_state_dict']
@@ -222,7 +223,8 @@ def process(pn, args):
     ]
 
     if args.optim == 'sgd':
-        optimizer = optim.SGD(optimizer_param_groups, momentum=args.momentum, nesterov=True)
+        # optimizer = optim.SGD(optimizer_param_groups, momentum=args.momentum, nesterov=True)
+        optimizer = optim.SGD(optimizer_param_groups, momentum=args.momentum, nesterov=False)
     elif args.optim == 'adamw':
         optimizer = optim.AdamW(optimizer_param_groups)
     else:
@@ -279,7 +281,9 @@ def process(pn, args):
         with open(args_file, 'w') as file:
             for key, value in vars(args).items():
                 file.write(f'{key}: {value}\n')
-        # print(f"Arguments saved in {args_file}")
+        cmd_file = os.path.join(log_dir, "cmd.txt")
+        with open(cmd_file, 'w') as file:
+            file.write(args.cmd)
         writer = SummaryWriter(log_dir=log_dir)
     else:
         writer = None
@@ -287,6 +291,7 @@ def process(pn, args):
     if world_pn == 0 and args.copy_to_a6000:
         slience_cmd(f"ssh {ssh_options} {a6000_login} 'mkdir -p {a6000_log_dir}'")
         copy_to_a6000(args_file, os.path.join(a6000_log_dir, "args.txt"))
+        copy_to_a6000(cmd_file, os.path.join(a6000_log_dir, "cmd.txt"))
         slience_cmd(f"ssh {ssh_options} {a6000_login} 'mkdir -p {a6000_log_dir}/src'")
         slience_cmd(f"scp {ssh_options} ./*.py {a6000_login}:{a6000_log_dir}/src/")
     
@@ -316,8 +321,9 @@ def process(pn, args):
         #     print(f"total_elements {total_elements}, relu_elements {relu_elements}, relu density = {relu_elements/total_elements}")
         
         if True or args.world_size > 1:
-            # ddp_test(args, testloader, model_t, _test_epoch, best_acc, -1, writer, pn)
+            ddp_test(args, testloader, model_t, _test_epoch, best_acc, 0, writer, pn, 1)
             ddp_test(args, testloader, model, _test_epoch, best_acc, 0, writer, pn, 1)
+            
 
         # if isinstance(model.module, VanillaNet_deploy_poly):
         #     test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, -1, writer, pn)
@@ -474,7 +480,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--only_test', type=ast.literal_eval, default=False)
 
-    parser.add_argument('--clamp_poly_weight', type=ast.literal_eval, default=True)
+    parser.add_argument('--clamp_poly_weight', type=ast.literal_eval, default=False)
 
     parser.add_argument('--relu_grad_max_norm', type=float, default=-1)
 
@@ -628,6 +634,9 @@ if __name__ == "__main__":
                 print("use fp16")
         else:
             print("use full precision")
+
+    command_line = ' '.join(sys.argv)
+    args.cmd = f"{sys.executable} {command_line}"
 
     mp.spawn(process, nprocs=args.node_gpu_count, args=(args, ))
     

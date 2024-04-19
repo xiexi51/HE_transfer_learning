@@ -106,6 +106,8 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
 
         if mixup_fn is not None:
             x, y = mixup_fn(x, y)
+
+        print()
         
         with torch.cuda.amp.autocast(enabled=args.use_amp, dtype=amp_dtype):
             if model_t is not None and (args.loss_conv_prune_factor > 0 or args.loss_fm_factor > 0 or args.loss_kd_factor > 0):
@@ -114,7 +116,7 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                     if args.loss_conv_prune_factor > 0:
                         out_t, fms_t, featuremap_t = model_t((x, 0, 1))
                     else:
-                        out_t, fms_t, featuremap_t = model_t((x, -1, 1))
+                        out_t, fms_t, featuremap_t = model_t((x, 0, 1))
 
             # if model_t.state_dict().keys() != model_s.module.state_dict().keys():
             #     print(f'key not same!')
@@ -123,6 +125,7 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
             #     if not torch.equal(model_t.state_dict()[key], model_s.module.state_dict()[key]):
             #         print(f'{key}')
 
+            print(threshold_end)
 
             if args.loss_conv_prune_factor > 0:
                 set_forward_with_fms(model_s, True)
@@ -143,6 +146,23 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                         out_s, featuremap_s = model_s((x, mask_current, threshold_end))
                     else:
                         out_s, featuremap_s = model_s(x)
+            
+            # params_s = {name: param for name, param in model_s.module.named_parameters()}
+            # params_t = {name: param for name, param in model_t.named_parameters()}
+
+            # # 检查两个模型中的对应参数是否存在数值差异
+            # for name in params_s:
+            #     if not name.endswith('weight_aux') and not name.endswith('relu.rand_mask'):
+            #         if name in params_t:
+            #             # 使用torch.allclose来比较参数是否接近相同
+            #             if not torch.allclose(params_s[name], params_t[name], atol=1e-6):
+            #                 print(f"Parameter '{name}' has different values in model_s and model_t.")
+            #                 break
+            #         else:
+            #             print(f"Parameter '{name}' is not in model_t.")
+            #             break
+
+            
         
             loss = 0
 
@@ -161,7 +181,8 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                 train_loss_fm += loss_fm.item()
             if args.loss_kd_factor > 0:
                 # loss_kd = criterion_kd(out_s, out_t) * args.loss_kd_factor
-                loss_kd = criterion_kd(featuremap_s, featuremap_t) * args.loss_kd_factor
+                # loss_kd = criterion_kd(featuremap_s, featuremap_t) * args.loss_kd_factor
+                loss_kd = mse_loss(featuremap_s, featuremap_t) * args.loss_kd_factor
                 loss += loss_kd
                 train_loss_kd += loss_kd.item()
 
@@ -175,6 +196,11 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
         scaler.scale(loss).backward(create_graph=hasattr(optimizer, 'is_second_order') and optimizer.is_second_order)
         accumulated_batches += 1
         train_loss += loss.item()
+
+        # for name, param in model_s.module.named_parameters():
+        #     if param.grad is not None and torch.any(param.grad != 0):
+        #         print(f"Gradient of {name} is \n{param.grad}")
+        #         break
 
         if mixup_fn is not None:                
             top1_num = (out_s.argmax(dim=1) == y.argmax(dim=1)).float().sum().item()
@@ -218,6 +244,22 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
 
             scaler.step(optimizer) 
             scaler.update() 
+
+
+            # params_s = {name: param for name, param in model_s.module.named_parameters()}
+            # params_t = {name: param for name, param in model_t.named_parameters()}
+
+            # # 检查两个模型中的对应参数是否存在数值差异
+            # for name in params_s:
+            #     if not name.endswith('weight_aux') and not name.endswith('relu.rand_mask'):
+            #         if name in params_t:
+            #             # 使用torch.allclose来比较参数是否接近相同
+            #             if not torch.allclose(params_s[name], params_t[name], atol=1e-6):
+            #                 print(f"Parameter '{name}' has different values in model_s and model_t.")
+            #                 break
+            #         else:
+            #             print(f"Parameter '{name}' is not in model_t.")
+            #             break
 
             if args.clamp_poly_weight:
                 for name, param in model_s.module.named_parameters():

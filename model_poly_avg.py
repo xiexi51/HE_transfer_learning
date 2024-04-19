@@ -28,14 +28,43 @@ class Conv2dPruned(nn.Conv2d):
     def __init__(self, prune_type, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
         super().__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
         self.prune_type = prune_type
+        self.in_channels = in_channels
+        self.out_channels = out_channels
         if self.prune_type == "pixel":
             self.weight_aux = nn.Parameter(torch.rand_like(self.weight))
         elif self.prune_type == "channel":
             self.weight_aux = nn.Parameter(torch.rand(out_channels))
         elif self.prune_type == "fixed_channel":
-            self.weight_aux = nn.Parameter(torch.rand(out_channels), requires_grad=False)
+            # self.weight_aux = nn.Parameter(torch.rand(out_channels), requires_grad=False)
+            self.weight_aux = nn.Parameter(torch.rand(in_channels), requires_grad=False)
 
     def forward(self, x, threshold):
+        max_max = -9999
+        min_min = 9999
+        max_mean = -9999
+        min_mean = 9999
+        max_std = -9999
+
+        for i in range(x.shape[1]):
+            input_channel = x[:, i:i+1, :, :] 
+            output_from_channel = F.conv2d(input_channel, self.weight[:, i:i+1, :, :], self.bias, self.stride, self.padding, self.dilation, self.groups)
+            max = output_from_channel.max().item()
+            min = output_from_channel.min().item()
+            mean = output_from_channel.mean().item()
+            std = output_from_channel.std().item()
+            if max > max_max:
+                max_max = max
+            if min < min_min:
+                min_min = min
+            if mean > max_mean:
+                max_mean = mean
+            if mean < min_mean:
+                min_mean = mean
+            if std > max_std:
+                max_std = std
+
+        print(f"max_max {max_max:.3f} min_min {min_min:.3f} max_mean {max_mean:.3f} min_mean {min_mean:.3f} max_std {max_std:.3f}")
+
         if self.prune_type == "pixel":
             mask = STEFunction.apply(self.weight_aux)
         elif self.prune_type == "channel":
@@ -43,11 +72,21 @@ class Conv2dPruned(nn.Conv2d):
             mask = mask.view(-1, 1, 1, 1).expand_as(self.weight)
         elif self.prune_type == "fixed_channel":
             mask = (threshold > self.weight_aux).float() 
-            mask = mask.view(-1, 1, 1, 1).expand_as(self.weight) 
+            # reshaped_mask = mask.view(1, self.out_channels, 1, 1)
+            reshaped_mask = mask.view(1, self.in_channels, 1, 1)
+
+            # mask = mask.view(-1, 1, 1, 1).expand_as(self.weight) 
         else:
             mask = 1
-        pruned_weight = self.weight * mask
-        return F.conv2d(x, pruned_weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+        # pruned_weight = self.weight * mask
+
+        if self.prune_type == "fixed_channel":
+            x *= reshaped_mask
+
+        out = F.conv2d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+        # if self.prune_type == "fixed_channel":
+        #     out *= reshaped_mask
+        return out
     
     def get_conv_density(self):
         mask = STEFunction.apply(self.weight_aux)
