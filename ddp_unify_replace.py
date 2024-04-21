@@ -480,7 +480,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--only_test', type=ast.literal_eval, default=False)
 
-    parser.add_argument('--clamp_poly_weight', type=ast.literal_eval, default=True)
+    parser.add_argument('--clamp_poly_weight', type=ast.literal_eval, default=False)
 
     parser.add_argument('--relu_grad_max_norm', type=float, default=-1)
 
