@@ -21,9 +21,15 @@ class activation_unify(nn.ReLU):
 
         self.bn = nn.BatchNorm2d(dim, eps=1e-6)
 
-        self.conv = Conv2dPruned(prune_type, in_channels=dim, out_channels=dim, kernel_size=(act_num * 2 + 1, act_num * 2 + 1), padding=act_num, groups=dim, bias=False)
+        self.weight = torch.nn.Parameter(torch.randn(dim, 1, act_num*2 + 1, act_num*2 + 1))
 
-        nn.init.trunc_normal_(self.conv.weight, std=0.02)
+        # self.conv = Conv2dPruned(prune_type, in_channels=dim, out_channels=dim, kernel_size=(act_num * 2 + 1, act_num * 2 + 1), padding=act_num, groups=dim, bias=False)
+
+        # nn.init.trunc_normal_(self.conv.weight, std=0.02)
+
+        self.dim = dim
+
+        nn.init.trunc_normal_(self.weight, std=0.02)
 
         if act_relu_type == "channel":
             self.relu = general_relu_poly(if_channel=True, if_pixel=True, weight_inits=poly_weight_inits, factors=poly_factors, num_channels=dim)
@@ -38,7 +44,8 @@ class activation_unify(nn.ReLU):
         else:
             x = self.relu(x, mask)
         fm = x
-        x = self.conv(x, threshold)
+        x = F.conv2d(x, self.weight, None, padding=self.act_num, groups=self.dim)
+        # x = self.conv(x, threshold)
         x = self.bn(x)
         return x, fm
 
