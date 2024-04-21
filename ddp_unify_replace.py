@@ -17,7 +17,7 @@ import torch.distributed as dist
 from utils_dataset import build_imagenet_dataset
 from timm.data import Mixup
 from vanillanet_deploy_poly import VanillaNet_deploy_poly
-from vanillanet_avg_full_poly import vanillanet_5_avg_full_poly, vanillanet_6_avg_full_poly, vanillanet_7_avg_full_poly, VanillaNetAvgPoly
+from vanillanet_full_unify import vanillanet_5_full_unify, vanillanet_6_full_unify, vanillanet_7_full_unify, VanillaNetFullUnify
 from model_poly_avg import ResNet18AvgCustom, ResNetAvgCustom
 from model import initialize_resnet
 
@@ -97,24 +97,24 @@ def process(pn, args):
     print("v_type = ", args.v_type)
     if args.v_type <= 7 and args.v_type >= 5:
         if args.v_type == 6:
-            vanillanet = vanillanet_6_avg_full_poly
+            vanillanet = vanillanet_6_full_unify
         elif args.v_type == 7:
-            vanillanet = vanillanet_7_avg_full_poly
+            vanillanet = vanillanet_7_full_unify
         else:
-            vanillanet = vanillanet_5_avg_full_poly
-        model = vanillanet(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.vanilla_shortcut, args.vanilla_keep_bn)
+            vanillanet = vanillanet_5_full_unify
+        model = vanillanet(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, args.vanilla_shortcut, args.vanilla_keep_bn)
     else:
-        model = ResNet18AvgCustom(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.if_wide, args.prune_type)
+        model = ResNet18AvgCustom(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, args.if_wide)
         initialize_resnet(model)
 
-    if args.teacher_file is not None and args.teacher_file != 'None':
+    if args.teacher_file is not None:
         if args.v_type <= 7 and args.v_type >= 5:
-            model_t = vanillanet("relu", [0, 0, 0], [0, 0, 0], if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
+            model_t = vanillanet("relu", [0, 0, 0], [0, 0, 0], "None", if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
         else:
             if args.loss_conv_prune_factor > 0:
-                model_t = ResNet18AvgCustom("channel", [0, 0, 0], [0, 0, 0], args.if_wide, "None")
+                model_t = ResNet18AvgCustom("channel", [0, 0, 0], [0, 0, 0], "None", args.if_wide)
             else:
-                model_t = ResNet18AvgCustom("relu", [0, 0, 0], [0, 0, 0], args.if_wide, "None")
+                model_t = ResNet18AvgCustom("relu", [0, 0, 0], [0, 0, 0], "None", args.if_wide)
             
         print(f"Loading teacher: {args.teacher_file}")     
         state_dict = torch.load(args.teacher_file)['model_state_dict']
@@ -133,6 +133,7 @@ def process(pn, args):
 
     if args.v_type <= 7 and args.v_type >= 5:
         if isinstance(model, VanillaNet_deploy_poly):
+            raise ValueError("don't use deploy version")
             assert args.deploy == True    
             _msg = "create deploy model"
         else:
@@ -232,7 +233,7 @@ def process(pn, args):
     if args.lookahead:
         optimizer = timm.optim.lookahead.Lookahead(optimizer)
     
-    if args.lr_anneal is None or args.lr_anneal == "None":
+    if args.lr_anneal is None:
         lr_scheduler = None
     else:
         if args.lr_anneal_tmax is None:
@@ -315,9 +316,9 @@ def process(pn, args):
 
         _mask_begin, _mask_end = mask_provider.get_mask(0)
 
-        # if world_pn == 0:            
-        #     total_elements, relu_elements = model.module.get_relu_density(_mask)    
-        #     print(f"total_elements {total_elements}, relu_elements {relu_elements}, relu density = {relu_elements/total_elements}")
+        if world_pn == 0:            
+            total_elements, relu_elements = model.module.get_relu_density(_mask)    
+            print(f"total_elements {total_elements}, relu_elements {relu_elements}, relu density = {relu_elements/total_elements}")
         
         if True or args.world_size > 1:
             # ddp_test(args, testloader, model_t, _test_epoch, best_acc, -1, writer, pn)
@@ -372,7 +373,7 @@ def process(pn, args):
                 writer.add_scalar('mask_end value', mask_end, epoch)
                 print("threshold_end = ", threshold_end)
                 writer.add_scalar('threshold_end value', threshold_end, epoch)
-            if isinstance(model.module, VanillaNetAvgPoly) and args.act_relu_type != "relu" and args.pixel_wise:
+            if isinstance(model.module, VanillaNetFullUnify) and args.act_relu_type != "relu" and args.pixel_wise:
                 total_elements, relu_elements = model.module.get_relu_density(mask_end)
                 print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
         
@@ -635,6 +636,10 @@ if __name__ == "__main__":
 
     command_line = ' '.join([os.path.basename(sys.argv[0])] + sys.argv[1:])
     args.cmd = f"python {command_line}"
+
+    for key, value in vars(args).items():
+        if value == "None":
+            setattr(args, key, None)
 
     mp.spawn(process, nprocs=args.node_gpu_count, args=(args, ))
     

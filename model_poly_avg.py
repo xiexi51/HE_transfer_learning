@@ -111,7 +111,7 @@ class BasicBlockAvgCustom(nn.Module):
         return total1 + total2 + total3, active1 + active2 + active3
 
 class ResNetAvgCustom(nn.Module):
-    def __init__(self, block, num_blocks, num_classes, relu_type, poly_weight_inits, poly_factors, if_wide, prune_type):
+    def __init__(self, block, num_blocks, num_classes, relu_type, poly_weight_inits, poly_factors, prune_type, if_wide):
         super().__init__()
         self.relu_type = relu_type
         self.poly_weight_inits = poly_weight_inits
@@ -199,7 +199,7 @@ class ResNetAvgCustom(nn.Module):
                 active += _active
         return total, active
         
-def ResNet18AvgCustom(relu_type, poly_weight_inits, poly_factors, if_wide, prune_type):
-    return ResNetAvgCustom(BasicBlockAvgCustom, [2, 2, 2, 2], 1000, relu_type, poly_weight_inits, poly_factors, if_wide, prune_type)
+def ResNet18AvgCustom(relu_type, poly_weight_inits, poly_factors, prune_type, if_wide):
+    return ResNetAvgCustom(BasicBlockAvgCustom, [2, 2, 2, 2], 1000, relu_type, poly_weight_inits, poly_factors, prune_type, if_wide)
 
 
