@@ -131,13 +131,14 @@ class BlockAvgPoly(nn.Module):
         return out, fms
 
 class VanillaNetFullUnify(nn.Module):
-    def __init__(self, act_relu_type, poly_weight_inits, poly_factors, prune_type, in_chans=3, num_classes=1000, dims=[96, 192, 384, 768], 
+    def __init__(self, act_relu_type, poly_weight_inits, poly_factors, prune_type, old_version, in_chans=3, num_classes=1000, dims=[96, 192, 384, 768], 
                  drop_rate=0, act_num=3, strides=[2,2,2,1], ada_pool=None, if_shortcut=True, keep_bn=False, **kwargs):
         super().__init__()
 
         self.keep_bn = keep_bn
         self.if_forward_with_fms = False
         self.drop_rate = drop_rate
+        self.old_version = old_version
 
         stride, padding = (4, 0) if not ada_pool else (3, 1)
         
@@ -167,12 +168,23 @@ class VanillaNetFullUnify(nn.Module):
 
         self.linear = nn.Linear(dims[-1], num_classes)
 
+        if self.old_version:
+            self.cls1_conv = Conv2dPruned(prune_type, dims[-1], num_classes, 1)
+            self.cls1_bn = nn.BatchNorm2d(num_classes, eps=1e-6)
+            self.cls2 = Conv2dPruned(num_classes, num_classes, 1)
+
         if act_relu_type == "channel":
             self.stem_relu = general_relu_poly(if_channel=True, if_pixel=True, weight_inits=poly_weight_inits, factors=poly_factors, num_channels=dims[0])
+            if self.old_version:
+                self.cls_relu = general_relu_poly(if_channel=True, if_pixel=True, weight_inits=poly_weight_inits, factors=poly_factors, num_channels=num_classes)
         elif act_relu_type == "fix":
             self.stem_relu = fix_relu_poly(if_pixel=True, factors=poly_factors)
+            if self.old_version:
+                self.cls_relu = fix_relu_poly(if_pixel=True, factors=poly_factors)
         else:
             self.stem_relu = nn.ReLU()
+            if self.old_version:
+                self.cls_relu = nn.ReLU()
         
         # self.apply(self._init_weights)
 
@@ -207,8 +219,15 @@ class VanillaNetFullUnify(nn.Module):
         featuremap = x
 
         x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
-        x = self.linear(x)
+
+        if self.old_version:
+            x = self.cls1_conv(x)
+            x = self.cls1_bn(x)
+            x = self.cls_relu(x)
+            x = self.cls2(x)            
+        else:
+            x = x.view(x.size(0), -1)
+            x = self.linear(x)
 
         if self.if_forward_with_fms:
             return (x, fms, featuremap)
@@ -246,18 +265,18 @@ class VanillaNetFullUnify(nn.Module):
 
 
 @register_model
-def vanillanet_5_full_unify(act_relu_type, poly_weight_inits, poly_factors, prune_type, if_shortcut, keep_bn, **kwargs):
-    model = VanillaNetFullUnify(act_relu_type, poly_weight_inits, poly_factors, prune_type, dims=[128*2, 256*2, 512*2, 1024*2], strides=[2,2,2], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
+def vanillanet_5_full_unify(act_relu_type, poly_weight_inits, poly_factors, prune_type, old_version, if_shortcut, keep_bn, **kwargs):
+    model = VanillaNetFullUnify(act_relu_type, poly_weight_inits, poly_factors, prune_type, old_version, dims=[128*2, 256*2, 512*2, 1024*2], strides=[2,2,2], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
     return model
 
 @register_model
-def vanillanet_6_full_unify(act_relu_type, poly_weight_inits, poly_factors, prune_type, if_shortcut, keep_bn, **kwargs):
-    model = VanillaNetFullUnify(act_relu_type, poly_weight_inits, poly_factors, prune_type, dims=[128*2, 256*2, 512*2, 1024*2, 1024*2], strides=[2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
+def vanillanet_6_full_unify(act_relu_type, poly_weight_inits, poly_factors, prune_type, old_version, if_shortcut, keep_bn, **kwargs):
+    model = VanillaNetFullUnify(act_relu_type, poly_weight_inits, poly_factors, prune_type, old_version, dims=[128*2, 256*2, 512*2, 1024*2, 1024*2], strides=[2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
     return model
 
 @register_model
-def vanillanet_7_full_unify(act_relu_type, poly_weight_inits, poly_factors, prune_type, if_shortcut, keep_bn, **kwargs):
-    model = VanillaNetFullUnify(act_relu_type, poly_weight_inits, poly_factors, prune_type, dims=[128*2, 128*2, 256*2, 512*2, 1024*2, 1024*2], strides=[1,2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
+def vanillanet_7_full_unify(act_relu_type, poly_weight_inits, poly_factors, prune_type, old_version, if_shortcut, keep_bn, **kwargs):
+    model = VanillaNetFullUnify(act_relu_type, poly_weight_inits, poly_factors, prune_type, old_version, dims=[128*2, 128*2, 256*2, 512*2, 1024*2, 1024*2], strides=[1,2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
     return model
 
 # @register_model

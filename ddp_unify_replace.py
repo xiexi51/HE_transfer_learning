@@ -102,14 +102,14 @@ def process(pn, args):
             vanillanet = vanillanet_7_full_unify
         else:
             vanillanet = vanillanet_5_full_unify
-        model = vanillanet(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, args.vanilla_shortcut, args.vanilla_keep_bn)
+        model = vanillanet(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, args.old_version, args.vanilla_shortcut, args.vanilla_keep_bn)
     else:
         model = ResNet18AvgCustom(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, args.if_wide)
         initialize_resnet(model)
 
     if args.teacher_file is not None:
         if args.v_type <= 7 and args.v_type >= 5:
-            model_t = vanillanet("relu", [0, 0, 0], [0, 0, 0], "None", if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
+            model_t = vanillanet("relu", [0, 0, 0], [0, 0, 0], "None", old_version=args.old_version, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
         else:
             if args.loss_conv_prune_factor > 0:
                 model_t = ResNet18AvgCustom("channel", [0, 0, 0], [0, 0, 0], "None", args.if_wide)
@@ -476,6 +476,7 @@ if __name__ == "__main__":
     parser.add_argument('--act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix'])
 
     parser.add_argument('--v_type', type=int, default=5, choices = [5, 6, 7, 18])
+    parser.add_argument('--old_version', type=ast.literal_eval, default=False)
 
     parser.add_argument('--only_test', type=ast.literal_eval, default=False)
 
