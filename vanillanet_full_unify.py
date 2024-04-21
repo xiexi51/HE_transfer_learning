@@ -23,7 +23,7 @@ class activation_unify(nn.ReLU):
 
         self.conv = Conv2dPruned(prune_type, in_channels=dim, out_channels=dim, kernel_size=(act_num * 2 + 1, act_num * 2 + 1), padding=act_num, groups=dim, bias=False)
 
-        # nn.init.trunc_normal_(self.conv.weight, std=0.02)
+        nn.init.trunc_normal_(self.conv.weight, std=0.02)
 
         if act_relu_type == "channel":
             self.relu = general_relu_poly(if_channel=True, if_pixel=True, weight_inits=poly_weight_inits, factors=poly_factors, num_channels=dim)
@@ -186,7 +186,7 @@ class VanillaNetFullUnify(nn.Module):
             if self.old_version:
                 self.cls_relu = nn.ReLU()
         
-        # self.apply(self._init_weights)
+        self.apply(self._init_weights)
 
     def _init_weights(self, m):
         if isinstance(m, (nn.Conv2d, nn.Linear)):
