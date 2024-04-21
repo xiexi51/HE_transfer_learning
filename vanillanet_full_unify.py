@@ -166,12 +166,12 @@ class VanillaNetFullUnify(nn.Module):
         self.avgpool = nn.AdaptiveAvgPool2d((1,1))
         # self.dropout = nn.Dropout(drop_rate)
 
-        self.linear = nn.Linear(dims[-1], num_classes)
-
         if self.old_version:
             self.cls1_conv = Conv2dPruned(prune_type, dims[-1], num_classes, 1)
             self.cls1_bn = nn.BatchNorm2d(num_classes, eps=1e-6)
-            self.cls2 = Conv2dPruned(num_classes, num_classes, 1)
+            self.cls2 = Conv2dPruned(prune_type, num_classes, num_classes, 1)
+        else:
+            self.linear = nn.Linear(dims[-1], num_classes)
 
         if act_relu_type == "channel":
             self.stem_relu = general_relu_poly(if_channel=True, if_pixel=True, weight_inits=poly_weight_inits, factors=poly_factors, num_channels=dims[0])
@@ -221,10 +221,14 @@ class VanillaNetFullUnify(nn.Module):
         x = self.avgpool(x)
 
         if self.old_version:
-            x = self.cls1_conv(x)
+            x = self.cls1_conv(x, threshold)
             x = self.cls1_bn(x)
-            x = self.cls_relu(x)
-            x = self.cls2(x)            
+            if isinstance(self.cls_relu, nn.ReLU):
+                x = self.cls_relu(x)
+            else:
+                x = self.cls_relu(x, mask)
+            x = self.cls2(x, threshold) 
+            x = x.view(x.size(0), -1)           
         else:
             x = x.view(x.size(0), -1)
             x = self.linear(x)
