@@ -219,8 +219,8 @@ def process(pn, args):
             other_params.append(param)
     
     optimizer_param_groups = [
-        {'params': other_params, 'lr': args.lr}, 
-        {'params': relu_weights, 'lr': args.lr * args.lr_relu_factor}
+        {'params': other_params, 'lr': args.lr, 'weight_decay': args.w_decay}, 
+        {'params': relu_weights, 'lr': args.lr * args.lr_relu_factor, 'weight_decay': args.w_decay}
     ]
 
     if args.optim == 'sgd':
@@ -480,7 +480,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--only_test', type=ast.literal_eval, default=False)
 
-    parser.add_argument('--clamp_poly_weight', type=ast.literal_eval, default=True)
+    parser.add_argument('--clamp_poly_weight', type=ast.literal_eval, default=False)
 
     parser.add_argument('--relu_grad_max_norm', type=float, default=-1)
 
