@@ -412,7 +412,7 @@ def process(pn, args):
             copy_to_a6000(os.path.join(log_dir, "acc.txt"), a6000_log_dir)
             copy_tensorboard_logs(log_dir, a6000_log_dir)
             print(f"copied acc.txt and tensorboard event to a6000")
-            if args.copy_model_every_epoch > 0 and epoch % args.copy_model_every_epoch == 0:
+            if args.copy_model_every_epoch > 0 and (epoch + 1) % args.copy_model_every_epoch == 0:
                 copy_to_a6000(checkpoint_path, a6000_log_dir, silent=False)
                 copy_to_a6000(os.path.join(log_dir, "best_model.pth"), a6000_log_dir, silent=False)
 
