@@ -14,14 +14,17 @@ a6000_login = "xix22010@192.168.10.16"
 # ssh_options = f"-o ProxyJump={cse_gateway_login} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 ssh_options = f"-o ProxyJump={cse_gateway_login} -o StrictHostKeyChecking=no "
 
-def slience_cmd(cmd):
+def slience_cmd(cmd, silent=True):
     try:
-        subprocess.run(cmd, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if silent:
+            subprocess.run(cmd, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            subprocess.run(cmd, shell=True, check=True)
     except subprocess.CalledProcessError as e:
         print(f"Error: {e}")
 
-def copy_to_a6000(source, destination):
-    slience_cmd(f"scp {ssh_options} {source} {a6000_login}:{destination}")
+def copy_to_a6000(source, destination, silent=True):
+    slience_cmd(f"scp {ssh_options} {source} {a6000_login}:{destination}", silent=silent)
 
 def copy_tensorboard_logs(log_dir, a6000_log_dir):
     tb_files = glob.glob(os.path.join(log_dir, 'events.out.tfevents.*'))

@@ -413,16 +413,15 @@ def process(pn, args):
             copy_tensorboard_logs(log_dir, a6000_log_dir)
             print(f"copied acc.txt and tensorboard event to a6000")
             if args.copy_model_every_epoch > 0 and epoch % args.copy_model_every_epoch == 0:
-                copy_to_a6000(checkpoint_path, a6000_log_dir)
-                copy_to_a6000(os.path.join(log_dir, "best_model.pth"), a6000_log_dir)
-
+                copy_to_a6000(checkpoint_path, a6000_log_dir, silent=False)
+                copy_to_a6000(os.path.join(log_dir, "best_model.pth"), a6000_log_dir, silent=False)
 
         dist.barrier()
 
     if writer is not None:
         writer.close()
     if world_pn == 0 and args.copy_to_a6000 and args.copy_model_every_epoch > 0:
-        copy_to_a6000(os.path.join(log_dir, "best_model.pth"), a6000_log_dir)
+        copy_to_a6000(os.path.join(log_dir, "best_model.pth"), a6000_log_dir, silent=False)
 
 if __name__ == "__main__":
     setproctitle.setproctitle("ddp")
