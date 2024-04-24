@@ -1,5 +1,9 @@
 import os
+import timm
 import timm.optim
+from timm.data import Mixup
+from timm.utils import ModelEma
+from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy, BinaryCrossEntropy
 import torch
 import torch.optim as optim
 import argparse
@@ -8,49 +12,21 @@ import ast
 import numpy as np
 import re
 from ddp_vanilla_training import ddp_vanilla_train, ddp_test, single_test
-from utils import MaskProvider, change_print_for_distributed
+from utils import MaskProvider, change_print_for_distributed, slience_cmd, copy_to_a6000, copy_tensorboard_logs, ssh_options, a6000_login
 from datetime import datetime
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data.distributed import DistributedSampler
 import torch.multiprocessing as mp
 import torch.distributed as dist
-from utils_dataset import build_imagenet_dataset
-from timm.data import Mixup
+from utils_dataset import build_dataset
 from vanillanet_deploy_poly import VanillaNet_deploy_poly
 from vanillanet_full_unify import vanillanet_5_full_unify, vanillanet_6_full_unify, vanillanet_7_full_unify, VanillaNetFullUnify
 from model_poly_avg import ResNet18AvgCustom, ResNetAvgCustom
 from model import initialize_resnet
-
-import timm
-from timm.utils import ModelEma
-from optim_factory import create_optimizer
-from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy, BinaryCrossEntropy
-import math
 from locals import proj_root
-import subprocess
-import glob
 import setproctitle
 import sys
-
-cse_gateway_login = "xix22010@137.99.0.102"
-a6000_login = "xix22010@192.168.10.16"
-# ssh_options = f"-o ProxyJump={cse_gateway_login} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-ssh_options = f"-o ProxyJump={cse_gateway_login} -o StrictHostKeyChecking=no "
-
-def slience_cmd(cmd):
-    try:
-        subprocess.run(cmd, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except subprocess.CalledProcessError as e:
-        print(f"Error: {e}")
-
-def copy_to_a6000(source, destination):
-    slience_cmd(f"scp {ssh_options} {source} {a6000_login}:{destination}")
-
-def copy_tensorboard_logs(log_dir, a6000_log_dir):
-    tb_files = glob.glob(os.path.join(log_dir, 'events.out.tfevents.*'))
-    for tb_file in tb_files:
-        destination = os.path.join(a6000_log_dir, os.path.basename(tb_file))
-        copy_to_a6000(tb_file, destination)
+import torchvision
 
 def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
     lr = init_lr * (lr_gamma ** (epoch // lr_step_size))
@@ -62,13 +38,10 @@ def process(pn, args):
     world_pn = pn + args.node_rank_begin
     change_print_for_distributed(world_pn == 0)
     torch.cuda.set_device(pn)
-    process_group = torch.distributed.init_process_group(backend="nccl", 
-                                                         init_method=f'tcp://{args.master_ip}:{args.master_port}', 
-                                                         world_size=args.world_size, rank=world_pn)
+    process_group = torch.distributed.init_process_group(backend="nccl", init_method=f'tcp://{args.master_ip}:{args.master_port}', world_size=args.world_size, rank=world_pn)
 
     torch.manual_seed(10)
     torch.cuda.manual_seed_all(10)
-    
     start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 
     mask_provider = MaskProvider(args.mask_decrease, args.mask_epochs)
@@ -77,10 +50,10 @@ def process(pn, args):
 
     print("gpu count =", torch.cuda.device_count())
     
-    trainset = build_imagenet_dataset(True, args)
+    trainset = build_dataset(args.dataset, is_train=True, if_download=False, args=args)
     train_sampler = DistributedSampler(trainset, num_replicas=args.world_size, rank=world_pn)
     trainloader = torch.utils.data.DataLoader(trainset, sampler=train_sampler, batch_size=args.batch_size_train, num_workers=args.num_train_loader_workers, pin_memory=True, shuffle=False, drop_last=True)
-    testset = build_imagenet_dataset(False, args) 
+    testset = build_dataset(args.dataset, is_train=False, if_download=False, args=args)
     test_sampler = DistributedSampler(testset, num_replicas=args.world_size, rank=world_pn)
     single_test_sampler = torch.utils.data.SequentialSampler(testset)
     testloader = torch.utils.data.DataLoader(testset, sampler=test_sampler, batch_size=args.batch_size_test, num_workers=args.num_test_loader_workers, pin_memory=True, shuffle=False, drop_last=False)
@@ -270,6 +243,7 @@ def process(pn, args):
 
     log_dir = log_root
     print("log_dir = ", log_dir)
+    args.log_dir = log_dir
     
     a6000_store_root = "/home/xix22010/py_projects/from_azure"
     a6000_log_dir = os.path.join(a6000_store_root, log_dir)
@@ -397,11 +371,6 @@ def process(pn, args):
         
         if lr_scheduler is not None:
             lr_scheduler.step()
-
-        if world_pn == 0 and args.copy_to_a6000:
-            copy_to_a6000(os.path.join(log_dir, "acc.txt"), a6000_log_dir)
-            copy_tensorboard_logs(log_dir, a6000_log_dir)
-            print(f"copied acc.txt and tensorboard event to a6000")
         
         if pn == 0: 
             if isinstance(model, torch.nn.parallel.DistributedDataParallel):
@@ -439,10 +408,21 @@ def process(pn, args):
                     oldest_checkpoint = recent_checkpoints.pop(0)
                     os.remove(oldest_checkpoint)
 
+        if world_pn == 0 and args.copy_to_a6000:
+            copy_to_a6000(os.path.join(log_dir, "acc.txt"), a6000_log_dir)
+            copy_tensorboard_logs(log_dir, a6000_log_dir)
+            print(f"copied acc.txt and tensorboard event to a6000")
+            if args.copy_model_every_epoch > 0 and epoch % args.copy_model_every_epoch == 0:
+                copy_to_a6000(checkpoint_path, a6000_log_dir)
+                copy_to_a6000(os.path.join(log_dir, "best_model.pth"), a6000_log_dir)
+
+
         dist.barrier()
 
     if writer is not None:
         writer.close()
+    if world_pn == 0 and args.copy_to_a6000 and args.copy_model_every_epoch > 0:
+        copy_to_a6000(os.path.join(log_dir, "best_model.pth"), a6000_log_dir)
 
 if __name__ == "__main__":
     setproctitle.setproctitle("ddp")
@@ -495,6 +475,10 @@ if __name__ == "__main__":
     parser.add_argument('--student_eval', type=ast.literal_eval, default=False)
     parser.add_argument('--threshold_min', type=float, default=0)
     
+    parser.add_argument('--build_dataset_old', type=ast.literal_eval, default=False)
+    parser.add_argument('--dataset', type=str, default='imagenet', choices=['imagenet', 'cifar10', 'cifar100'])
+    parser.add_argument('--copy_model_every_epoch', type=int, default=0)
+
     # imagenet dataset arguments
     parser.add_argument('--color_jitter', type=float, default=0.4, metavar='PCT', help='Color jitter factor (default: 0.4)')
     parser.add_argument('--aa', type=str, default='rand-m7-mstd0.5-inc1', metavar='NAME', help='Use AutoAugment policy. "v0" or "original". " + "(default: rand-m9-mstd0.5-inc1)')
@@ -641,6 +625,10 @@ if __name__ == "__main__":
     for key, value in vars(args).items():
         if value == "None":
             setattr(args, key, None)
+
+    if args.dataset == 'cifar10':
+        build_dataset(args.dataset, is_train=True, if_download=True, args=args)
+        build_dataset(args.dataset, is_train=False, if_download=True, args=args)
 
     mp.spawn(process, nprocs=args.node_gpu_count, args=(args, ))
     

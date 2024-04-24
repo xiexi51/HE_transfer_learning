@@ -5,6 +5,29 @@ from torch.nn import functional as F
 import torch.nn as nn
 import numpy as np
 import torch.distributed as dist
+import subprocess
+import glob
+import os
+
+cse_gateway_login = "xix22010@137.99.0.102"
+a6000_login = "xix22010@192.168.10.16"
+# ssh_options = f"-o ProxyJump={cse_gateway_login} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+ssh_options = f"-o ProxyJump={cse_gateway_login} -o StrictHostKeyChecking=no "
+
+def slience_cmd(cmd):
+    try:
+        subprocess.run(cmd, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError as e:
+        print(f"Error: {e}")
+
+def copy_to_a6000(source, destination):
+    slience_cmd(f"scp {ssh_options} {source} {a6000_login}:{destination}")
+
+def copy_tensorboard_logs(log_dir, a6000_log_dir):
+    tb_files = glob.glob(os.path.join(log_dir, 'events.out.tfevents.*'))
+    for tb_file in tb_files:
+        destination = os.path.join(a6000_log_dir, os.path.basename(tb_file))
+        copy_to_a6000(tb_file, destination)
 
 def print_available_gpus():
     num_devices = torch.cuda.device_count()

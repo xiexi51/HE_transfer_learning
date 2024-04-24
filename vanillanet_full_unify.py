@@ -233,6 +233,8 @@ class VanillaNetFullUnify(nn.Module):
             x = x.view(x.size(0), -1)
             x = self.linear(x)
 
+        fms.append(x)
+
         if self.if_forward_with_fms:
             return (x, fms, featuremap)
         else:
