@@ -172,6 +172,8 @@ def process(pn, args):
             )
         print("Using EMA with decay = %s" % args.model_ema_decay)
 
+    assert not ((args.freeze_linear or args.freeze_relu) and args.freeze_base), "(freeze_linear or freeze_relu), and freeze_base cannot be true at the same time."
+
     if args.freeze_linear:
         for param in model.linear.parameters():
             param.requires_grad = False
@@ -179,6 +181,64 @@ def process(pn, args):
         for name, param in model.named_parameters():
             if name.endswith('.relu.weight'):
                 param.requires_grad = False
+
+    if args.freeze_base:
+        assert args.student_eval, "base model should be set to bn eval in transfer learning"
+        for name, param in model.named_parameters():
+            param.requires_grad = False
+
+    if args.unfreeze_type is not None:
+        if isinstance(model, VanillaNetFullUnify):
+            if args.unfreeze_type == "linear":
+                layers_to_unfreeze = [
+                    model.linear
+                ]
+            elif args.unfreeze_type == "last_1_conv":
+                layers_to_unfreeze = [
+                    model.linear,
+                    model.stages[-1].act,
+                    model.stages[-1].conv2
+                ]
+            elif args.unfreeze_type == "last_2_conv":
+                layers_to_unfreeze = [
+                    model.linear,
+                    model.stages[-1].act,
+                    model.stages[-1].conv2,
+                    model.stages[-1].relu,
+                    model.stages[-1].conv1
+                ]
+
+        elif isinstance(model, ResNetAvgCustom):
+            if args.unfreeze_type == "linear":
+                layers_to_unfreeze = [
+                    model.linear
+                ]
+            elif args.unfreeze_type == "last_1_conv":
+                layers_to_unfreeze = [
+                    model.linear,
+                    model.layer4[-1].conv2,
+                    model.layer4[-1].bn2,
+                    model.layer4[-1].relu2,
+                    # model.layer4[-1].shortcut
+                ]
+            elif args.unfreeze_type == "last_2_conv":
+                layers_to_unfreeze = [
+                    model.linear,
+                    model.layer4[-1].conv2,
+                    model.layer4[-1].bn2,
+                    model.layer4[-1].relu2,
+                    model.layer4[-1].conv1,
+                    model.layer4[-1].bn1,
+                    model.layer4[-1].relu1
+                ]
+
+        for layer in layers_to_unfreeze:
+            for param in layer.parameters():
+                param.requires_grad = True
+
+    linear_features = model.linear.in_features
+    if args.dataset == "cifar10":
+        model.linear = torch.nn.Linear(linear_features, 10)
 
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = DistributedDataParallel(model, device_ids=[pn])
@@ -290,18 +350,13 @@ def process(pn, args):
 
         _mask_begin, _mask_end = mask_provider.get_mask(0)
 
-        if world_pn == 0:            
-            total_elements, relu_elements = model.module.get_relu_density(_mask)    
-            print(f"total_elements {total_elements}, relu_elements {relu_elements}, relu density = {relu_elements/total_elements}")
+        # if world_pn == 0:            
+        #     total_elements, relu_elements = model.module.get_relu_density(_mask)    
+        #     print(f"total_elements {total_elements}, relu_elements {relu_elements}, relu density = {relu_elements/total_elements}")
         
         if True or args.world_size > 1:
             # ddp_test(args, testloader, model_t, _test_epoch, best_acc, -1, writer, pn)
             ddp_test(args, testloader, model, _test_epoch, best_acc, 0, writer, pn, 1)
-
-        # if isinstance(model.module, VanillaNet_deploy_poly):
-        #     test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, -1, writer, pn)
-        # else:
-        #     test_acc = ddp_test(args, testloader, model, _test_epoch, best_acc, None, writer, pn)
 
         return
 
@@ -467,10 +522,13 @@ if __name__ == "__main__":
 
     parser.add_argument('--if_wide', type=ast.literal_eval, default=False)
 
-    parser.add_argument('--prune_type', type=str, default="None", choices=['channel', 'pixel', 'fixed_channel', 'None'])
+    parser.add_argument('--prune_type', type=str, default='None', choices=['channel', 'pixel', 'fixed_channel', 'None'])
 
     parser.add_argument('--freeze_linear', type=ast.literal_eval, default=False)
     parser.add_argument('--freeze_relu', type=ast.literal_eval, default=False)
+    parser.add_argument('--freeze_base', type=ast.literal_eval, default=False)
+    parser.add_argument('--unfreeze_type', type=str, default='None', choices=['None', 'linear', 'last_1_conv', 'last_2_conv'])
+
     parser.add_argument('--student_eval', type=ast.literal_eval, default=False)
     parser.add_argument('--threshold_min', type=float, default=0)
     

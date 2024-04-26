@@ -139,6 +139,8 @@ class VanillaNetFullUnify(nn.Module):
         self.if_forward_with_fms = False
         self.drop_rate = drop_rate
         self.old_version = old_version
+        if self.old_version:
+            raise ValueError("Currently disabled old version.")
 
         stride, padding = (4, 0) if not ada_pool else (3, 1)
         
@@ -167,24 +169,28 @@ class VanillaNetFullUnify(nn.Module):
         # self.dropout = nn.Dropout(drop_rate)
 
         if self.old_version:
-            self.cls1_conv = Conv2dPruned(prune_type, dims[-1], num_classes, 1)
-            self.cls1_bn = nn.BatchNorm2d(num_classes, eps=1e-6)
-            self.cls2 = Conv2dPruned(prune_type, num_classes, num_classes, 1)
+            pass
+            # self.cls1_conv = Conv2dPruned(prune_type, dims[-1], num_classes, 1)
+            # self.cls1_bn = nn.BatchNorm2d(num_classes, eps=1e-6)
+            # self.cls2 = Conv2dPruned(prune_type, num_classes, num_classes, 1)
         else:
             self.linear = nn.Linear(dims[-1], num_classes)
 
         if act_relu_type == "channel":
             self.stem_relu = general_relu_poly(if_channel=True, if_pixel=True, weight_inits=poly_weight_inits, factors=poly_factors, num_channels=dims[0])
             if self.old_version:
-                self.cls_relu = general_relu_poly(if_channel=True, if_pixel=True, weight_inits=poly_weight_inits, factors=poly_factors, num_channels=num_classes)
+                pass
+                # self.cls_relu = general_relu_poly(if_channel=True, if_pixel=True, weight_inits=poly_weight_inits, factors=poly_factors, num_channels=num_classes)
         elif act_relu_type == "fix":
             self.stem_relu = fix_relu_poly(if_pixel=True, factors=poly_factors)
             if self.old_version:
-                self.cls_relu = fix_relu_poly(if_pixel=True, factors=poly_factors)
+                pass
+                # self.cls_relu = fix_relu_poly(if_pixel=True, factors=poly_factors)
         else:
             self.stem_relu = nn.ReLU()
             if self.old_version:
-                self.cls_relu = nn.ReLU()
+                pass
+                # self.cls_relu = nn.ReLU()
         
         self.apply(self._init_weights)
 
@@ -221,14 +227,15 @@ class VanillaNetFullUnify(nn.Module):
         x = self.avgpool(x)
 
         if self.old_version:
-            x = self.cls1_conv(x, threshold)
-            x = self.cls1_bn(x)
-            if isinstance(self.cls_relu, nn.ReLU):
-                x = self.cls_relu(x)
-            else:
-                x = self.cls_relu(x, mask)
-            x = self.cls2(x, threshold) 
-            x = x.view(x.size(0), -1)           
+            pass
+            # x = self.cls1_conv(x, threshold)
+            # x = self.cls1_bn(x)
+            # if isinstance(self.cls_relu, nn.ReLU):
+            #     x = self.cls_relu(x)
+            # else:
+            #     x = self.cls_relu(x, mask)
+            # x = self.cls2(x, threshold) 
+            # x = x.view(x.size(0), -1)           
         else:
             x = x.view(x.size(0), -1)
             x = self.linear(x)
