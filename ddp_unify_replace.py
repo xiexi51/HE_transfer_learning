@@ -148,6 +148,52 @@ def process(pn, args):
         else:
             print(f"No checkpoint found at {checkpoint_path}")
 
+    assert not ((args.freeze_linear or args.freeze_relu) and args.freeze_base), "(freeze_linear or freeze_relu), and freeze_base cannot be true at the same time."
+
+    if args.freeze_linear:
+        for param in model.linear.parameters():
+            param.requires_grad = False
+    if args.freeze_relu:
+        for name, param in model.named_parameters():
+            if name.endswith('.relu.weight'):
+                param.requires_grad = False
+
+    if args.freeze_base:
+        # assert args.student_eval, "base model should be set to bn eval in transfer learning"
+        for name, param in model.named_parameters():
+            param.requires_grad = False
+
+    if args.num_layers_to_unfreeze > 0:
+        if isinstance(model, VanillaNetFullUnify):
+            layers_to_unfreeze = [
+                    model.stages[-1].conv1,
+                    model.stages[-1].relu,
+                    model.stages[-1].conv2,
+                    model.stages[-1].act,
+                    model.linear
+                ]        
+        elif isinstance(model, ResNetAvgCustom):
+            layers_to_unfreeze = [
+                model.layer4[-1].shortcut,
+                model.layer4[-1].conv1,
+                model.layer4[-1].bn1,
+                model.layer4[-1].relu1,
+                model.layer4[-1].conv2,
+                model.layer4[-1].bn2,
+                model.layer4[-1].relu2,
+                model.linear
+            ]
+
+        for layer in layers_to_unfreeze[-args.num_layers_to_unfreeze:]:
+            print(f"unfreeze {layer}")
+            for name, param in layer.named_parameters():
+                if not name.endswith("rand_mask"):
+                    param.requires_grad = True
+
+    linear_features = model.linear.in_features
+    if args.dataset == "cifar10":
+        model.linear = torch.nn.Linear(linear_features, 10)
+
     model = model.cuda()
 
     if model_t is not None:
@@ -172,73 +218,7 @@ def process(pn, args):
             )
         print("Using EMA with decay = %s" % args.model_ema_decay)
 
-    assert not ((args.freeze_linear or args.freeze_relu) and args.freeze_base), "(freeze_linear or freeze_relu), and freeze_base cannot be true at the same time."
-
-    if args.freeze_linear:
-        for param in model.linear.parameters():
-            param.requires_grad = False
-    if args.freeze_relu:
-        for name, param in model.named_parameters():
-            if name.endswith('.relu.weight'):
-                param.requires_grad = False
-
-    if args.freeze_base:
-        assert args.student_eval, "base model should be set to bn eval in transfer learning"
-        for name, param in model.named_parameters():
-            param.requires_grad = False
-
-    if args.unfreeze_type is not None:
-        if isinstance(model, VanillaNetFullUnify):
-            if args.unfreeze_type == "linear":
-                layers_to_unfreeze = [
-                    model.linear
-                ]
-            elif args.unfreeze_type == "last_1_conv":
-                layers_to_unfreeze = [
-                    model.linear,
-                    model.stages[-1].act,
-                    model.stages[-1].conv2
-                ]
-            elif args.unfreeze_type == "last_2_conv":
-                layers_to_unfreeze = [
-                    model.linear,
-                    model.stages[-1].act,
-                    model.stages[-1].conv2,
-                    model.stages[-1].relu,
-                    model.stages[-1].conv1
-                ]
-
-        elif isinstance(model, ResNetAvgCustom):
-            if args.unfreeze_type == "linear":
-                layers_to_unfreeze = [
-                    model.linear
-                ]
-            elif args.unfreeze_type == "last_1_conv":
-                layers_to_unfreeze = [
-                    model.linear,
-                    model.layer4[-1].conv2,
-                    model.layer4[-1].bn2,
-                    model.layer4[-1].relu2,
-                    # model.layer4[-1].shortcut
-                ]
-            elif args.unfreeze_type == "last_2_conv":
-                layers_to_unfreeze = [
-                    model.linear,
-                    model.layer4[-1].conv2,
-                    model.layer4[-1].bn2,
-                    model.layer4[-1].relu2,
-                    model.layer4[-1].conv1,
-                    model.layer4[-1].bn1,
-                    model.layer4[-1].relu1
-                ]
-
-        for layer in layers_to_unfreeze:
-            for param in layer.parameters():
-                param.requires_grad = True
-
-    linear_features = model.linear.in_features
-    if args.dataset == "cifar10":
-        model.linear = torch.nn.Linear(linear_features, 10)
+    
 
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = DistributedDataParallel(model, device_ids=[pn])
@@ -527,7 +507,8 @@ if __name__ == "__main__":
     parser.add_argument('--freeze_linear', type=ast.literal_eval, default=False)
     parser.add_argument('--freeze_relu', type=ast.literal_eval, default=False)
     parser.add_argument('--freeze_base', type=ast.literal_eval, default=False)
-    parser.add_argument('--unfreeze_type', type=str, default='None', choices=['None', 'linear', 'last_1_conv', 'last_2_conv'])
+    # parser.add_argument('--unfreeze_type', type=str, default='None', choices=['None', 'linear', 'last_1_conv', 'last_2_conv'])
+    parser.add_argument('--num_layers_to_unfreeze', type=int, default=0)
 
     parser.add_argument('--student_eval', type=ast.literal_eval, default=False)
     parser.add_argument('--threshold_min', type=float, default=0)
@@ -535,6 +516,7 @@ if __name__ == "__main__":
     parser.add_argument('--build_dataset_old', type=ast.literal_eval, default=False)
     parser.add_argument('--dataset', type=str, default='imagenet', choices=['imagenet', 'cifar10', 'cifar100'])
     parser.add_argument('--copy_model_every_epoch', type=int, default=0)
+    parser.add_argument('--data_augment', type=ast.literal_eval, default=False)
 
     # imagenet dataset arguments
     parser.add_argument('--color_jitter', type=float, default=0.4, metavar='PCT', help='Color jitter factor (default: 0.4)')

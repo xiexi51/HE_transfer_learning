@@ -77,13 +77,14 @@ class BasicBlockAvgCustom(nn.Module):
 
     def forward(self, x, mask, threshold):
         fms = []
-        out = self.conv1(x, threshold)
+
         if len(self.shortcut._modules) > 0:
             shortcut = self.shortcut[0](x, threshold)
             shortcut = self.shortcut[1](shortcut)
         else:
             shortcut = self.shortcut(x)
 
+        out = self.conv1(x, threshold)
         out = self.bn1(out)
         out = self.relu1(out, mask)
         fms.append(out)

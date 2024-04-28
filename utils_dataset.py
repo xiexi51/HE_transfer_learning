@@ -9,13 +9,23 @@ def build_dataset(dataset_name, is_train, if_download, args):
     std = IMAGENET_DEFAULT_STD
     if is_train:
         if args.build_dataset_old and dataset_name != "imagenet":
-            transform = transforms.Compose([
-            transforms.RandomResizedCrop(224, antialias=True),
-            # transforms.Resize(224),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std)
-            ])
+            if args.data_augment:
+                transform = transforms.Compose([
+                    transforms.RandomResizedCrop(224, antialias=True),
+                    # transforms.Resize(224),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean, std)
+                    ])
+            else:
+                transform = transforms.Compose([
+                    # transforms.Resize(256),
+                    # transforms.CenterCrop(224),
+                    transforms.Resize(224),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean, std)
+                    ])
+
         else:
             transform = create_transform(
                 input_size=224,
