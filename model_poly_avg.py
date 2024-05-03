@@ -67,8 +67,16 @@ class Conv2dPruned(nn.Conv2d):
     
     def get_conv_density(self):
         if self.weight_aux is None:
-            return 0, 0
-        mask = STEFunction.apply(self.weight_aux)
+            return self.weight.numel(), self.weight.numel()
+        if self.prune_type == "group_pixel":
+            weight_aux_expanded = self.weight_aux.repeat_interleave(self.granularity, dim=0)
+            weight_aux_expanded = weight_aux_expanded[:self.weight.shape[1]]
+            weight_aux_expanded = weight_aux_expanded.unsqueeze(0).expand(self.weight.shape[0], -1, -1, -1)
+            mask = STEFunction.apply(weight_aux_expanded)
+        elif self.prune_type == "pixel":
+            mask = STEFunction.apply(self.weight_aux)
+        else:
+            raise Exception("The current implementation only supports 'group_pixel' or 'pixel'.")
         total = mask.numel()
         active = torch.sum(mask)
         return total, active
