@@ -240,7 +240,7 @@ class VanillaNetFullUnify(nn.Module):
             x = x.view(x.size(0), -1)
             x = self.linear(x)
 
-        fms.append(x)
+        # fms.append(x)
 
         if self.if_forward_with_fms:
             return (x, fms, featuremap)
@@ -274,6 +274,17 @@ class VanillaNetFullUnify(nn.Module):
             return -1, -1
         else:
             return total, relu
+        
+    def get_conv_density(self):
+        total = 0
+        active = 0
+        for module in self.modules():
+            if isinstance(module, Conv2dPruned):
+                _total, _active = module.get_conv_density()
+                if _total > 0:
+                    total += _total
+                    active += _active
+        return total, active
 
 
 
