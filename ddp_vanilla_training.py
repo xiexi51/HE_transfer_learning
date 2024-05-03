@@ -113,7 +113,7 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                 with torch.no_grad():
                     set_forward_with_fms(model_t, True)
                     if args.loss_conv_prune_factor > 0:
-                        out_t, fms_t, featuremap_t = model_t((x, 0, 1))
+                        out_t, fms_t, featuremap_t = model_t((x, -1, 1))
                     else:
                         out_t, fms_t, featuremap_t = model_t((x, -1, 1))
 
