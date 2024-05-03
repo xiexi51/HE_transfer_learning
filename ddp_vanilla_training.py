@@ -35,6 +35,7 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
     train_loss_kd = 0
     train_loss_ce = 0
     train_loss_fm = 0
+    train_loss_conv = 0
 
     total_l2_norm = 0.0
     param_count = 0
@@ -123,35 +124,20 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
             #     if not torch.equal(model_t.state_dict()[key], model_s.module.state_dict()[key]):
             #         print(f'{key}')
 
-
-            if args.loss_conv_prune_factor > 0:
-                set_forward_with_fms(model_s, True)
-                if mask is not None:
-                    out_s, fms_s, featuremap_s = model_s((x, mask_current, threshold_end))
-                else:
-                    out_s, featuremap_s = model_s(x)
-                
-                total_conv, active_conv = model_s.module.get_conv_density()
-
+            set_forward_with_fms(model_s, True)
+            if mask is not None:
+                out_s, fms_s, featuremap_s = model_s((x, mask_current, threshold_end))
             else:
-                if args.loss_fm_factor > 0:
-                    set_forward_with_fms(model_s, True)
-                    out_s, fms_s, featuremap_s = model_s((x, mask_current, threshold_end))
-                else:
-                    set_forward_with_fms(model_s, False)
-                    if mask is not None:
-                        out_s, featuremap_s = model_s((x, mask_current, threshold_end))
-                    else:
-                        out_s, featuremap_s = model_s(x)
-        
+                out_s, featuremap_s = model_s(x)
+           
             loss = 0
 
             if args.loss_conv_prune_factor > 0:
+                total_conv, active_conv = model_s.module.get_conv_density()
                 active_conv_rate = active_conv / total_conv
-                loss += active_conv_rate * args.loss_conv_prune_factor
-                loss_kd = criterion_kd(featuremap_s, featuremap_t) * 1
-                loss += loss_kd
-                train_loss_kd += loss_kd.item()
+                loss_conv = active_conv_rate * args.loss_conv_prune_factor
+                loss += loss_conv
+                train_loss_conv += loss_conv.item()
             else:
                 active_conv_rate = 1
 
@@ -248,6 +234,7 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
         writer.add_scalar('Loss_fm/train', train_loss_fm/total, epoch)
         writer.add_scalar('Loss_kd/train', train_loss_kd/total, epoch)
         writer.add_scalar('Loss_ce/train', train_loss_ce/total, epoch)
+        writer.add_scalar('Loss_conv/train', train_loss_conv/total, epoch)
 
     avg_l2_norm = total_l2_norm / param_count if param_count > 0 else 0
     return train_acc, avg_l2_norm

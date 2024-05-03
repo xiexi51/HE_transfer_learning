@@ -502,11 +502,11 @@ if __name__ == "__main__":
 
     parser.add_argument('--if_wide', type=ast.literal_eval, default=False)
 
-    parser.add_argument('--prune_type', type=str, default='None', choices=['channel', 'pixel', 'fixed_channel', 'None'])
+    parser.add_argument('--prune_type', type=str, default='None', choices=['group_pixel', 'channel', 'pixel', 'fixed_channel', 'None'])
 
     parser.add_argument('--freeze_linear', type=ast.literal_eval, default=False)
     parser.add_argument('--freeze_relu', type=ast.literal_eval, default=False)
-    parser.add_argument('--freeze_base', type=ast.literal_eval, default=False)
+    # parser.add_argument('--freeze_base', type=ast.literal_eval, default=False)
     # parser.add_argument('--unfreeze_type', type=str, default='None', choices=['None', 'linear', 'last_1_conv', 'last_2_conv'])
     parser.add_argument('--num_layers_to_unfreeze', type=int, default=0)
 
@@ -603,7 +603,7 @@ if __name__ == "__main__":
     parser.add_argument('--resume_epoch', type=int, default=None)
     parser.add_argument('--resume_log_root', type=ast.literal_eval, default=False)
 
-    parser.add_argument('--reload', type=ast.literal_eval, default=False)
+    # parser.add_argument('--reload', type=ast.literal_eval, default=False)
     parser.add_argument('--reload_file', type=str, default=None)
 
     parser.add_argument('--teacher_file', type=str, default=None)
@@ -664,6 +664,9 @@ if __name__ == "__main__":
     for key, value in vars(args).items():
         if value == "None":
             setattr(args, key, None)
+
+    args.reload = args.reload_file is not None
+    args.freeze_base = args.num_layers_to_unfreeze > 0
 
     if args.dataset == 'cifar10':
         build_dataset(args.dataset, is_train=True, if_download=True, args=args)

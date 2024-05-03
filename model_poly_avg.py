@@ -28,12 +28,21 @@ class Conv2dPruned(nn.Conv2d):
     def __init__(self, prune_type, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
         super().__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
         self.prune_type = prune_type
+        self.granularity = 8
+        self.weight_aux = None
         if self.prune_type == "pixel":
             self.weight_aux = nn.Parameter(torch.rand_like(self.weight))
         elif self.prune_type == "channel":
             self.weight_aux = nn.Parameter(torch.rand(out_channels))
         elif self.prune_type == "fixed_channel":
             self.weight_aux = nn.Parameter(torch.rand(out_channels), requires_grad=False)
+        elif self.prune_type == "group_pixel":
+            if not (self.weight.shape[-2] == 1 and self.weight.shape[-1] == 1):
+                if in_channels < self.granularity:
+                    self.weight_aux = nn.Parameter(torch.rand(1, self.weight.shape[-2], self.weight.shape[-1]))
+                else:
+                    self.weight_aux = nn.Parameter(torch.rand(in_channels // self.granularity, self.weight.shape[-2], self.weight.shape[-1]))
+
 
     def forward(self, x, threshold):
         if self.prune_type == "pixel":
@@ -44,12 +53,21 @@ class Conv2dPruned(nn.Conv2d):
         elif self.prune_type == "fixed_channel":
             mask = (threshold > self.weight_aux).float() 
             mask = mask.view(-1, 1, 1, 1).expand_as(self.weight) 
+        elif self.prune_type == "group_pixel" and self.weight_aux is not None:
+            # Expand weight_aux to match the shape of self.weight
+            weight_aux_expanded = self.weight_aux.repeat_interleave(self.granularity, dim=0)
+            weight_aux_expanded = weight_aux_expanded[:self.weight.shape[1]]
+            weight_aux_expanded = weight_aux_expanded.unsqueeze(0).expand(self.weight.shape[0], -1, -1, -1)
+            # Apply STEFunction to create the mask
+            mask = STEFunction.apply(weight_aux_expanded)
         else:
             mask = 1
         pruned_weight = self.weight * mask
         return F.conv2d(x, pruned_weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
     
     def get_conv_density(self):
+        if self.weight_aux is None:
+            return 0, 0
         mask = STEFunction.apply(self.weight_aux)
         total = mask.numel()
         active = torch.sum(mask)
@@ -191,13 +209,14 @@ class ResNetAvgCustom(nn.Module):
         return total, relu
     
     def get_conv_density(self):
-        total, active = self.conv1.get_conv_density()
-        layers = [self.layer1, self.layer2, self.layer3, self.layer4]
-        for layer in layers:
-            for block in layer:
-                _total, _active = block.get_conv_density()
-                total += _total
-                active += _active
+        total = 0
+        active = 0
+        for module in self.modules():
+            if isinstance(module, Conv2dPruned):
+                _total, _active = module.get_conv_density()
+                if _total > 0:
+                    total += _total
+                    active += _active
         return total, active
         
 def ResNet18AvgCustom(relu_type, poly_weight_inits, poly_factors, prune_type, if_wide):
