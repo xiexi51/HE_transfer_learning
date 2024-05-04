@@ -15,13 +15,13 @@ from model_poly_avg import Conv2dPruned
 
 # Series informed activation function. Implemented by conv.
 class activation_unify(nn.ReLU):
-    def __init__(self, act_relu_type, poly_weight_inits, poly_factors, prune_type, dim, act_num=3):
+    def __init__(self, act_relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, dim, act_num=3):
         super().__init__()
         self.act_num = act_num
 
         self.bn = nn.BatchNorm2d(dim, eps=1e-6)
 
-        self.conv = Conv2dPruned(prune_type, in_channels=dim, out_channels=dim, kernel_size=(act_num * 2 + 1, act_num * 2 + 1), padding=act_num, groups=dim, bias=False)
+        self.conv = Conv2dPruned(prune_type, prune_1_1_kernel, in_channels=dim, out_channels=dim, kernel_size=(act_num * 2 + 1, act_num * 2 + 1), padding=act_num, groups=dim, bias=False)
 
         nn.init.trunc_normal_(self.conv.weight, std=0.02)
 
@@ -50,7 +50,7 @@ class activation_unify(nn.ReLU):
 
 
 class BlockAvgPoly(nn.Module):
-    def __init__(self, act_relu_type, poly_weight_inits, poly_factors, prune_type, dim, dim_out, act_num=3, stride=2, ada_pool=None, if_shortcut=True, keep_bn = False):
+    def __init__(self, act_relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, dim, dim_out, act_num=3, stride=2, ada_pool=None, if_shortcut=True, keep_bn = False):
         super().__init__()
         # self.dim = dim
         # self.dim_out = dim_out
@@ -60,11 +60,11 @@ class BlockAvgPoly(nn.Module):
         self.keep_bn = keep_bn
         
         self.conv1 = nn.Sequential(
-            Conv2dPruned(prune_type, dim, dim, kernel_size=1),
+            Conv2dPruned(prune_type, prune_1_1_kernel, dim, dim, kernel_size=1),
             nn.BatchNorm2d(dim, eps=1e-6),
         )
         self.conv2 = nn.Sequential(
-            Conv2dPruned(prune_type, dim, dim_out, kernel_size=1),
+            Conv2dPruned(prune_type, prune_1_1_kernel, dim, dim_out, kernel_size=1),
             nn.BatchNorm2d(dim_out, eps=1e-6)
         )
 
@@ -73,7 +73,7 @@ class BlockAvgPoly(nn.Module):
         else:
             self.pool = nn.Identity() if stride == 1 else nn.AdaptiveAvgPool2d((ada_pool, ada_pool))
 
-        self.act = activation_unify(act_relu_type, poly_weight_inits, poly_factors, prune_type, dim_out, act_num)
+        self.act = activation_unify(act_relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, dim_out, act_num)
 
         if act_relu_type == "channel":
             self.relu = general_relu_poly(if_channel=True, if_pixel=True, weight_inits=poly_weight_inits, factors=poly_factors, num_channels=dim)
@@ -131,7 +131,7 @@ class BlockAvgPoly(nn.Module):
         return out, fms
 
 class VanillaNetFullUnify(nn.Module):
-    def __init__(self, act_relu_type, poly_weight_inits, poly_factors, prune_type, old_version, in_chans=3, num_classes=1000, dims=[96, 192, 384, 768], 
+    def __init__(self, act_relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, old_version, in_chans=3, num_classes=1000, dims=[96, 192, 384, 768], 
                  drop_rate=0, act_num=3, strides=[2,2,2,1], ada_pool=None, if_shortcut=True, keep_bn=False, **kwargs):
         super().__init__()
 
@@ -145,13 +145,13 @@ class VanillaNetFullUnify(nn.Module):
         stride, padding = (4, 0) if not ada_pool else (3, 1)
         
         self.stem1 = nn.Sequential(
-            Conv2dPruned(prune_type, in_chans, dims[0], kernel_size=4, stride=stride, padding=padding),
+            Conv2dPruned(prune_type, prune_1_1_kernel, in_chans, dims[0], kernel_size=4, stride=stride, padding=padding),
             nn.BatchNorm2d(dims[0], eps=1e-6),
         )
         self.stem2 = nn.Sequential(
-            Conv2dPruned(prune_type, dims[0], dims[0], kernel_size=1, stride=1),
+            Conv2dPruned(prune_type, prune_1_1_kernel, dims[0], dims[0], kernel_size=1, stride=1),
             nn.BatchNorm2d(dims[0], eps=1e-6),
-            activation_unify(act_relu_type, poly_weight_inits, poly_factors, prune_type, dims[0], act_num)
+            activation_unify(act_relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, dims[0], act_num)
         )
 
         # self.act_learn = 0
@@ -159,9 +159,9 @@ class VanillaNetFullUnify(nn.Module):
         self.stages = nn.ModuleList()
         for i in range(len(strides)):
             if not ada_pool:
-                stage = BlockAvgPoly(act_relu_type, poly_weight_inits, poly_factors, prune_type, dim=dims[i], dim_out=dims[i+1], act_num=act_num, stride=strides[i], if_shortcut=if_shortcut, keep_bn=keep_bn)
+                stage = BlockAvgPoly(act_relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, dim=dims[i], dim_out=dims[i+1], act_num=act_num, stride=strides[i], if_shortcut=if_shortcut, keep_bn=keep_bn)
             else:
-                stage = BlockAvgPoly(act_relu_type, poly_weight_inits, poly_factors, prune_type, dim=dims[i], dim_out=dims[i+1], act_num=act_num, stride=strides[i], ada_pool=ada_pool[i], if_shortcut=if_shortcut, keep_bn=keep_bn)
+                stage = BlockAvgPoly(act_relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, dim=dims[i], dim_out=dims[i+1], act_num=act_num, stride=strides[i], ada_pool=ada_pool[i], if_shortcut=if_shortcut, keep_bn=keep_bn)
             self.stages.append(stage)
         self.depth = len(strides)
 
@@ -289,18 +289,18 @@ class VanillaNetFullUnify(nn.Module):
 
 
 @register_model
-def vanillanet_5_full_unify(act_relu_type, poly_weight_inits, poly_factors, prune_type, old_version, if_shortcut, keep_bn, **kwargs):
-    model = VanillaNetFullUnify(act_relu_type, poly_weight_inits, poly_factors, prune_type, old_version, dims=[128*2, 256*2, 512*2, 1024*2], strides=[2,2,2], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
+def vanillanet_5_full_unify(act_relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, old_version, if_shortcut, keep_bn, **kwargs):
+    model = VanillaNetFullUnify(act_relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, old_version, dims=[128*2, 256*2, 512*2, 1024*2], strides=[2,2,2], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
     return model
 
 @register_model
-def vanillanet_6_full_unify(act_relu_type, poly_weight_inits, poly_factors, prune_type, old_version, if_shortcut, keep_bn, **kwargs):
-    model = VanillaNetFullUnify(act_relu_type, poly_weight_inits, poly_factors, prune_type, old_version, dims=[128*2, 256*2, 512*2, 1024*2, 1024*2], strides=[2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
+def vanillanet_6_full_unify(act_relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, old_version, if_shortcut, keep_bn, **kwargs):
+    model = VanillaNetFullUnify(act_relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, old_version, dims=[128*2, 256*2, 512*2, 1024*2, 1024*2], strides=[2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
     return model
 
 @register_model
-def vanillanet_7_full_unify(act_relu_type, poly_weight_inits, poly_factors, prune_type, old_version, if_shortcut, keep_bn, **kwargs):
-    model = VanillaNetFullUnify(act_relu_type, poly_weight_inits, poly_factors, prune_type, old_version, dims=[128*2, 128*2, 256*2, 512*2, 1024*2, 1024*2], strides=[1,2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
+def vanillanet_7_full_unify(act_relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, old_version, if_shortcut, keep_bn, **kwargs):
+    model = VanillaNetFullUnify(act_relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, old_version, dims=[128*2, 128*2, 256*2, 512*2, 1024*2, 1024*2], strides=[1,2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
     return model
 
 # @register_model

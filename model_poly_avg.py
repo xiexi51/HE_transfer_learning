@@ -25,9 +25,10 @@ class custom_relu(nn.Module):
         return self.relu.get_relu_density(mask)
 
 class Conv2dPruned(nn.Conv2d):
-    def __init__(self, prune_type, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
+    def __init__(self, prune_type, prune_1_1_kernel, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
         super().__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
         self.prune_type = prune_type
+        self.prune_1_1_kernel = prune_1_1_kernel
         self.granularity = 8
         self.group_granularity = 8
         self.weight_aux = None
@@ -38,7 +39,7 @@ class Conv2dPruned(nn.Conv2d):
         elif self.prune_type == "fixed_channel":
             self.weight_aux = nn.Parameter(torch.rand(out_channels), requires_grad=False)
         elif self.prune_type == "group_pixel":
-            if not (self.weight.shape[-2] == 1 and self.weight.shape[-1] == 1 and groups == 1):
+            if not (self.weight.shape[-2] == 1 and self.weight.shape[-1] == 1) or self.prune_1_1_kernel:
                 if groups > 1 and groups == in_channels:
                     self.weight_aux = nn.Parameter(torch.rand(groups // self.group_granularity, self.weight.shape[-2], self.weight.shape[-1]))
                 else:
@@ -87,17 +88,17 @@ class Conv2dPruned(nn.Conv2d):
 class BasicBlockAvgCustom(nn.Module):
     expansion = 1
 
-    def __init__(self, in_planes, planes, stride, relu_type, poly_weight_inits, poly_factors, prune_type):
+    def __init__(self, in_planes, planes, stride, relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel):
         super().__init__()
-        self.conv1 = Conv2dPruned(prune_type, in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.conv1 = Conv2dPruned(prune_type, prune_1_1_kernel, in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(planes)
-        self.conv2 = Conv2dPruned(prune_type, planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
+        self.conv2 = Conv2dPruned(prune_type, prune_1_1_kernel, planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
 
         self.shortcut = nn.Sequential()
         if stride != 1 or in_planes != self.expansion*planes:
             self.shortcut = nn.Sequential(
-                Conv2dPruned(prune_type, in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
+                Conv2dPruned(prune_type, prune_1_1_kernel, in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
                 nn.BatchNorm2d(self.expansion*planes)
             )
 
@@ -141,17 +142,18 @@ class BasicBlockAvgCustom(nn.Module):
         return total1 + total2 + total3, active1 + active2 + active3
 
 class ResNetAvgCustom(nn.Module):
-    def __init__(self, block, num_blocks, num_classes, relu_type, poly_weight_inits, poly_factors, prune_type, if_wide):
+    def __init__(self, block, num_blocks, num_classes, relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, if_wide):
         super().__init__()
         self.relu_type = relu_type
         self.poly_weight_inits = poly_weight_inits
         self.poly_factors = poly_factors
         self.prune_type = prune_type
+        self.prune_1_1_kernel = prune_1_1_kernel
 
         self.avgpool = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
 
         self.in_planes = 64
-        self.conv1 = Conv2dPruned(prune_type, 3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.conv1 = Conv2dPruned(prune_type, prune_1_1_kernel, 3, 64, kernel_size=7, stride=2, padding=3, bias=False)
 
         self.bn1 = nn.BatchNorm2d(64)
         if not if_wide:
@@ -175,7 +177,7 @@ class ResNetAvgCustom(nn.Module):
         strides = [stride] + [1]*(num_blocks-1)
         blocks = []
         for stride in strides:
-            blocks.append(block(self.in_planes, planes, stride, self.relu_type, self.poly_weight_inits, self.poly_factors, self.prune_type))
+            blocks.append(block(self.in_planes, planes, stride, self.relu_type, self.poly_weight_inits, self.poly_factors, self.prune_type, self.prune_1_1_kernel))
             self.in_planes = planes * block.expansion
         return nn.Sequential(*blocks)
         
@@ -230,7 +232,7 @@ class ResNetAvgCustom(nn.Module):
                     active += _active
         return total, active
         
-def ResNet18AvgCustom(relu_type, poly_weight_inits, poly_factors, prune_type, if_wide):
-    return ResNetAvgCustom(BasicBlockAvgCustom, [2, 2, 2, 2], 1000, relu_type, poly_weight_inits, poly_factors, prune_type, if_wide)
+def ResNet18AvgCustom(relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, if_wide):
+    return ResNetAvgCustom(BasicBlockAvgCustom, [2, 2, 2, 2], 1000, relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, if_wide)
 
 
