@@ -60,11 +60,11 @@ class BlockAvgPoly(nn.Module):
         self.keep_bn = keep_bn
         
         self.conv1 = nn.Sequential(
-            Conv2dPruned(prune_type, prune_1_1_kernel, dim, dim, kernel_size=1),
+            Conv2dPruned(prune_type, prune_1_1_kernel, dim, dim, kernel_size=3, padding=1),
             nn.BatchNorm2d(dim, eps=1e-6),
         )
         self.conv2 = nn.Sequential(
-            Conv2dPruned(prune_type, prune_1_1_kernel, dim, dim_out, kernel_size=1),
+            Conv2dPruned(prune_type, prune_1_1_kernel, dim, dim_out, kernel_size=3, padding=1),
             nn.BatchNorm2d(dim_out, eps=1e-6)
         )
 
@@ -149,7 +149,7 @@ class VanillaNetFullUnify(nn.Module):
             nn.BatchNorm2d(dims[0], eps=1e-6),
         )
         self.stem2 = nn.Sequential(
-            Conv2dPruned(prune_type, prune_1_1_kernel, dims[0], dims[0], kernel_size=1, stride=1),
+            Conv2dPruned(prune_type, prune_1_1_kernel, dims[0], dims[0], kernel_size=3, padding=1, stride=1),
             nn.BatchNorm2d(dims[0], eps=1e-6),
             activation_unify(act_relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, dims[0], act_num)
         )
