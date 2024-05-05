@@ -7,7 +7,7 @@ import ast
 from model import ResNet18Poly, general_relu_poly, convert_to_bf16_except_bn, find_submodule, copy_parameters
 import numpy as np
 import re
-from ddp_vanilla_training import ddp_vanilla_train, ddp_test, single_test
+from HE_transfer_learning.ddp_unify_training import ddp_vanilla_train, ddp_test, single_test
 from utils import MaskProvider, change_print_for_distributed
 from datetime import datetime
 from torch.nn.parallel import DistributedDataParallel

@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 import ast
 import numpy as np
 import re
-from ddp_vanilla_training import ddp_vanilla_train, ddp_test, single_test
+from ddp_unify_training import ddp_vanilla_train, ddp_test, single_test
 from utils import MaskProvider, change_print_for_distributed, slience_cmd, copy_to_a6000, copy_tensorboard_logs, ssh_options, a6000_login
 from datetime import datetime
 from torch.nn.parallel import DistributedDataParallel
