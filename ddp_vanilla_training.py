@@ -86,11 +86,8 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
         mask_current = 0
 
     accumulated_batches = 0
-
     scaler = torch.cuda.amp.GradScaler(enabled=args.use_amp)
-
     optimizer.zero_grad()
-
     if args.bf16:
         amp_dtype = torch.bfloat16
     else:
@@ -99,12 +96,7 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
     for iter, (x, y) in enumerate(pbar):
         if iter >= effective_batches:
             break
-
         x, y = x.cuda(), y.cuda()
-
-        # if args.bf16:
-        #     x = x.to(dtype=torch.bfloat16)
-
         if mixup_fn is not None:
             x, y = mixup_fn(x, y)
         
@@ -116,13 +108,6 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                         out_t, fms_t, featuremap_t = model_t((x, -1, 1))
                     else:
                         out_t, fms_t, featuremap_t = model_t((x, -1, 1))
-
-            # if model_t.state_dict().keys() != model_s.module.state_dict().keys():
-            #     print(f'key not same!')
-
-            # for key in model_t.state_dict():
-            #     if not torch.equal(model_t.state_dict()[key], model_s.module.state_dict()[key]):
-            #         print(f'{key}')
 
             set_forward_with_fms(model_s, True)
             if mask is not None:
@@ -173,24 +158,16 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
 
         reduced_total = torch.tensor(total, dtype=torch.float).cuda().detach()
         reduced_top1_total = torch.tensor(top1_total, dtype=torch.float).cuda().detach()
-        
-        # dist.reduce(reduced_total, dst=0)
-        # dist.reduce(reduced_top1_total, dst=0)
-
         dist.all_reduce(reduced_total)
         dist.all_reduce(reduced_top1_total)
-
         reduced_total = reduced_total.cpu().numpy()
         reduced_top1_total = reduced_top1_total.cpu().numpy()
         
         if args.pbar and world_pn == 0:
-            # print(total, top1_total, top5_total)
-            # print(reduced_total, reduced_top1_total, reduced_top5_total)
             pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e},conv{active_conv_rate:.3f} 1a {100*reduced_top1_total/reduced_total:.1f}, 5a -, m{mask_current:.4f}")
 
         if accumulated_batches == update_freq:
             mask_current += mask_iter
-            
             for name, param in model_s.module.named_parameters():
                 if name.endswith('.relu.weight') and param.grad is not None:
                     norm = torch.norm(param.grad.data, p=2).item()
@@ -201,28 +178,10 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                     param_count += 1
                 if name.endswith('weight_aux') and param.grad is not None:
                     param.grad.data *= 1
-
             scaler.step(optimizer) 
             scaler.update() 
-
-            if args.clamp_poly_weight:
-                for name, param in model_s.module.named_parameters():
-                    if name.endswith('.relu.weight'):
-                        with torch.no_grad():
-                            param.data[:, 0] = torch.clamp(param.data[:, 0], min=args.poly_weight_min[0], max=args.poly_weight_max[0])
-                            param.data[:, 1] = torch.clamp(param.data[:, 1], min=args.poly_weight_min[1], max=args.poly_weight_max[1])
-                            param.data[:, 2] = torch.clamp(param.data[:, 2], min=args.poly_weight_min[2], max=args.poly_weight_max[2])
-
             optimizer.zero_grad() 
             accumulated_batches = 0 
-            if model_ema is not None:
-                for iter_model_ema in model_ema:
-                    iter_model_ema.update(model_s)
-                    for i in range(len(iter_model_ema.ema.stages)):
-                        if hasattr(iter_model_ema.ema.stages[i], 'act_learn'):
-                            iter_model_ema.ema.stages[i].act_learn = model_s.module.stages[i].act_learn
-                        if hasattr(iter_model_ema.ema, 'act_learn'):
-                            iter_model_ema.ema.act_learn = model_s.module.act_learn
 
     # print(mask_current, mask[1])
 
