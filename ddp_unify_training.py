@@ -20,9 +20,9 @@ def set_forward_with_fms(model, if_forward_with_fms):
     else:
         model.if_forward_with_fms = if_forward_with_fms
 
-def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Module, model_t: torch.nn.Module, optimizer: torch.optim.Optimizer, 
+def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Module, model_t: torch.nn.Module, optimizer: torch.optim.Optimizer, 
               epoch: int, mask: Tuple[float, float], writer: SummaryWriter, world_pn: int, omit_fms: int, mixup_fn: Mixup, criterion_ce: torch.nn.Module, 
-              max_norm: float, update_freq: int, model_ema: List[ModelEma], act_learn: float, threshold_end: float):
+              max_norm: float, update_freq: int, model_ema: List[ModelEma], act_learn: float, threshold_end: float, undo_grad: bool):
     if args.student_eval:
         model_s.eval()
     else:
@@ -92,10 +92,20 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
         amp_dtype = torch.bfloat16
     else:
         amp_dtype = torch.float16
+    
+    prev_iter_train_acc = 0
+    prev_model_state_dict = None
+    prev_optimizer_state_dict = None
+    undo_grad_signal = "-"
 
     for iter, (x, y) in enumerate(pbar):
         if iter >= effective_batches:
             break
+        if undo_grad:
+            # Save the current model and optimizer states
+            prev_model_state_dict = model_s.state_dict()
+            prev_optimizer_state_dict = optimizer.state_dict()
+
         x, y = x.cuda(), y.cuda()
         if mixup_fn is not None:
             x, y = mixup_fn(x, y)
@@ -117,14 +127,12 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
            
             loss = 0
 
-            if args.loss_conv_prune_factor > 0:
-                total_conv, active_conv = model_s.module.get_conv_density()
-                active_conv_rate = active_conv / total_conv
+            total_conv, active_conv = model_s.module.get_conv_density()
+            active_conv_rate = active_conv / total_conv
+            if args.loss_conv_prune_factor > 0:    
                 loss_conv = active_conv_rate * args.loss_conv_prune_factor
                 loss += loss_conv
                 train_loss_conv += loss_conv.item()
-            else:
-                active_conv_rate = 1
 
             if args.loss_fm_factor > 0:
                 loss_fm = sum(loss_fm_fun(x, y) for x, y in zip(fms_s[omit_fms:], fms_t[omit_fms:])) * args.loss_fm_factor
@@ -141,31 +149,34 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
                 loss += loss_ce
                 train_loss_ce += loss_ce.item()
 
-        loss /= update_freq
-        # assert math.isfinite(loss)
-        scaler.scale(loss).backward(create_graph=hasattr(optimizer, 'is_second_order') and optimizer.is_second_order)
-        accumulated_batches += 1
-        train_loss += loss.item()
-
         if mixup_fn is not None:                
             top1_num = (out_s.argmax(dim=1) == y.argmax(dim=1)).float().sum().item()
         else:
             top1_num = (out_s.argmax(dim=1) == y).float().sum().item()
-
         top1_total += top1_num
-
         total += x.size(0)
-
         reduced_total = torch.tensor(total, dtype=torch.float).cuda().detach()
         reduced_top1_total = torch.tensor(top1_total, dtype=torch.float).cuda().detach()
         dist.all_reduce(reduced_total)
         dist.all_reduce(reduced_top1_total)
         reduced_total = reduced_total.cpu().numpy()
         reduced_top1_total = reduced_top1_total.cpu().numpy()
-        
-        if args.pbar and world_pn == 0:
-            pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e},conv{active_conv_rate:.3f} 1a {100*reduced_top1_total/reduced_total:.1f}, 5a -, m{mask_current:.4f}")
+        iter_train_acc = reduced_top1_total / reduced_total
 
+        if undo_grad:
+            if iter > 0 and prev_iter_train_acc - iter_train_acc > args.undo_grad_threshold:
+                undo_grad_signal = "u"
+                model_s.load_state_dict(prev_model_state_dict)
+                optimizer.load_state_dict(prev_optimizer_state_dict)
+            else:
+                undo_grad_signal = "-"
+                prev_iter_train_acc = iter_train_acc
+
+        loss /= update_freq
+        # assert math.isfinite(loss)
+        scaler.scale(loss).backward(create_graph=hasattr(optimizer, 'is_second_order') and optimizer.is_second_order)
+        accumulated_batches += 1
+        train_loss += loss.item()
         if accumulated_batches == update_freq:
             mask_current += mask_iter
             for name, param in model_s.module.named_parameters():
@@ -182,6 +193,9 @@ def ddp_vanilla_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.
             scaler.update() 
             optimizer.zero_grad() 
             accumulated_batches = 0 
+        
+        if args.pbar and world_pn == 0:
+            pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e},conv{active_conv_rate:.3f} 1a {100*iter_train_acc:.1f}, m{mask_current:.4f}, {undo_grad_signal}")
 
     # print(mask_current, mask[1])
 

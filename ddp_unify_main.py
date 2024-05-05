@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 import ast
 import numpy as np
 import re
-from ddp_unify_training import ddp_vanilla_train, ddp_test, single_test
+from ddp_unify_training import ddp_unify_train, ddp_test, single_test
 from utils import MaskProvider, change_print_for_distributed, slience_cmd, copy_to_a6000, copy_tensorboard_logs, ssh_options, a6000_login
 from datetime import datetime
 from torch.nn.parallel import DistributedDataParallel
@@ -21,7 +21,7 @@ import torch.distributed as dist
 from utils_dataset import build_dataset
 from vanillanet_deploy_poly import VanillaNet_deploy_poly
 from vanillanet_full_unify import vanillanet_5_full_unify, vanillanet_6_full_unify, vanillanet_7_full_unify, VanillaNetFullUnify
-from model_poly_avg import ResNet18AvgCustom, ResNetAvgCustom
+from model_poly_avg import ResNet18AvgCustom, ResNetAvgCustom, Conv2dPruned
 from model import initialize_resnet
 from locals import proj_root
 import setproctitle
@@ -192,31 +192,16 @@ def process(pn, args):
     if args.dataset == "cifar10":
         model.linear = torch.nn.Linear(linear_features, 10)
 
+    if args.loss_conv_prune_factor == 0:
+        for name, module in model.named_modules():
+            if isinstance(module, Conv2dPruned):
+                if hasattr(module, 'weight_aux') and module.weight_aux is not None:
+                    module.weight_aux.requires_grad = False
+
     model = model.cuda()
 
     if model_t is not None:
         model_t = model_t.cuda()
-
-    if args.switch_to_deploy:
-        raise ValueError("don't switch to deploy here")
-        model.switch_to_deploy()
-        print(f"switch to deploy with keep_bn = {args.vanilla_keep_bn}")
-        if pn == 0:
-            # torch.save(model.state_dict(), os.path.join(proj_root, "save_vanilla6_avg_acc74/deploy_vanilla6_acc74.pth"))
-            torch.save(model.state_dict(), os.path.join(proj_root, "save_vanilla5_avg_shortcut_acc70/deploy_vanilla5_shortcut_keepbn_acc70.pth"))
-
-    model_ema = None
-    if args.model_ema:
-        raise ValueError("The EMA model has not been validated yet.")
-        # Important to create EMA model after cuda(), DP wrapper, and AMP but before SyncBN and DDP wrapper
-        model_ema = []
-        for ema_decay in args.model_ema_decay:
-            model_ema.append(
-                ModelEma(model, decay=ema_decay, device='cpu' if args.model_ema_force_cpu else '', resume='')
-            )
-        print("Using EMA with decay = %s" % args.model_ema_decay)
-
-    
 
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = DistributedDataParallel(model, device_ids=[pn])
@@ -362,14 +347,6 @@ def process(pn, args):
         if threshold_end < args.threshold_min:
             threshold_end = args.threshold_min
 
-        # if not args.deploy:
-        #     act_learn_begin, act_learn_end = act_learn_provider.get_mask(epoch)
-        #     act_learn = 1 - act_learn_end
-            
-        #     model.module.change_act(act_learn)
-        # else:
-        #     act_learn = 1
-
         act_learn = 0
 
         # mask = 1
@@ -385,9 +362,13 @@ def process(pn, args):
                 print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
         
         omit_fms = 0
-        train_acc, avg_l2_norm = ddp_vanilla_train(args=args, trainloader=trainloader, model_s=model, model_t=model_t, optimizer=optimizer, epoch=epoch, 
+        if args.undo_grad_epoch != -1 and epoch >= args.undo_grad_epoch and args.undo_grad_threshold < 1:
+            undo_grad = True
+        else:
+            undo_grad = False
+        train_acc, avg_l2_norm = ddp_unify_train(args=args, trainloader=trainloader, model_s=model, model_t=model_t, optimizer=optimizer, epoch=epoch, 
                                       mask=mask, writer=writer, world_pn=world_pn, omit_fms=omit_fms, mixup_fn=mixup_fn, criterion_ce=criterion_ce, 
-                                      max_norm=None, update_freq=args.update_freq, model_ema=None, act_learn=act_learn, threshold_end=threshold_end)
+                                      max_norm=None, update_freq=args.update_freq, model_ema=None, act_learn=act_learn, threshold_end=threshold_end, undo_grad=undo_grad)
         
         print('avg_l2_norm = ', avg_l2_norm)
 
@@ -512,6 +493,9 @@ if __name__ == "__main__":
     # parser.add_argument('--freeze_base', type=ast.literal_eval, default=False)
     # parser.add_argument('--unfreeze_type', type=str, default='None', choices=['None', 'linear', 'last_1_conv', 'last_2_conv'])
     parser.add_argument('--num_layers_to_unfreeze', type=int, default=0)
+
+    parser.add_argument('--undo_grad_epoch', type=int, default=-1)
+    parser.add_argument('--undo_grad_threshold', type=float, default=1)
 
     parser.add_argument('--student_eval', type=ast.literal_eval, default=False)
     parser.add_argument('--threshold_min', type=float, default=0)

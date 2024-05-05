@@ -9,3 +9,4 @@ tmp*
 ip_list
 /save_*
 /success_*
+/pruned_*
