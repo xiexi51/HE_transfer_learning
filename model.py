@@ -45,8 +45,8 @@ class star_relu(nn.Module):
         assert len(x.shape) == 4, "Input must have 4 dimensions (B, C, H, W)"
         x = x.permute(0, 2, 3, 1)  # Move C to the end
         x = self.linear1(x)  # Pass through linear1
-        x = x.contiguous()
-        x1, x2 = x.chunk(2, dim=-1)  # Split along C dimension
+        B, H, W, C = x.size()
+        x1, x2 = x.reshape(B, H, W, 2, int(C // 2)).unbind(3)
         x = 0.01 * x1 * x2  # Dot product
         x = self.linear2(x)  # Pass through linear2
         x = x.permute(0, 3, 1, 2)  # Move C back to its original position
