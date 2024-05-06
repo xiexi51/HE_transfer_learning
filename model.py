@@ -34,6 +34,24 @@ class fix_relu_poly(nn.Module):
         relu_elements = if_relu.sum().item()
         return total_elements, relu_elements
 
+class star_relu(nn.Module):
+    def __init__(self, num_channels):
+        super().__init__()
+        self.num_channels = num_channels
+        self.linear1 = nn.Linear(num_channels, 6 * num_channels)
+        self.linear2 = nn.Linear(3 * num_channels, num_channels)
+    
+    def forward(self, x):
+        assert len(x.shape) == 4, "Input must have 4 dimensions (B, C, H, W)"
+        x = x.permute(0, 2, 3, 1)  # Move C to the end
+        x = self.linear1(x)  # Pass through linear1
+        x1, x2 = x.chunk(2, dim=-1)  # Split along C dimension
+        x = 0.01 * x1 * x2  # Dot product
+        x = self.linear2(x)  # Pass through linear2
+        x = x.permute(0, 3, 1, 2)  # Move C back to its original position
+        return x
+
+
 class general_relu_poly(nn.Module):
     def __init__(self, if_channel, if_pixel, weight_inits, factors, num_channels):
         super().__init__()

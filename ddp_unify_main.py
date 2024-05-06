@@ -467,8 +467,8 @@ if __name__ == "__main__":
 
     parser.add_argument('--update_freq', default=1, type=int, help='gradient accumulation steps')
 
-    parser.add_argument('--act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix'])
-    parser.add_argument('--teacher_act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix'])
+    parser.add_argument('--act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix', 'star'])
+    parser.add_argument('--teacher_act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix', 'star'])
 
     parser.add_argument('--v_type', type=int, default=5, choices = [5, 6, 7, 18])
     parser.add_argument('--old_version', type=ast.literal_eval, default=False)
@@ -653,6 +653,7 @@ if __name__ == "__main__":
             setattr(args, key, None)
 
     args.reload = args.reload_file is not None
+    
     args.freeze_base = args.num_layers_to_unfreeze > 0
 
     if args.dataset == 'cifar10':

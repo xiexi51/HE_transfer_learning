@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from model import fix_relu_poly, general_relu_poly
+from model import fix_relu_poly, general_relu_poly, star_relu
 from utils import STEFunction
     
 class custom_relu(nn.Module):
@@ -11,11 +11,13 @@ class custom_relu(nn.Module):
             self.relu = general_relu_poly(if_channel=True, if_pixel=True, weight_inits=poly_weight_inits, factors=poly_factors, num_channels=num_channels)
         elif relu_type == "fix":
             self.relu = fix_relu_poly(if_pixel=True, factors=poly_factors)
+        elif relu_type == "star":
+            self.relu = star_relu(num_channels)
         else:
             self.relu = nn.ReLU()
     
     def forward(self, x, mask):
-        if isinstance(self.relu, nn.ReLU):
+        if isinstance(self.relu, nn.ReLU) or isinstance(self.relu, star_relu):
             x = self.relu(x)
         else:
             x = self.relu(x, mask)
