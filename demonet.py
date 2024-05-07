@@ -8,7 +8,7 @@ Modified Date: Mar/29/2024
 
 import torch
 import torch.nn as nn
-from timm.models.layers import trunc_normal_, DropPath
+from timm.models.layers import trunc_normal_
 from timm.models.registry import register_model
 
 
@@ -23,7 +23,7 @@ class Block(nn.Module):
         self.g = nn.Linear(3 * dim, dim)
         self.gamma = nn.Parameter(layer_scale_init_value * torch.ones((dim)),
                                   requires_grad=True) if layer_scale_init_value > 0 else 1.
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.drop_path =  nn.Identity()
 
     def forward(self, x):
         input = x
