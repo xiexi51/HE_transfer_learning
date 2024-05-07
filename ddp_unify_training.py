@@ -134,7 +134,7 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
                 active_conv_rate = active_conv / total_conv
             else:
                 active_conv_rate = 1
-                
+
             if args.loss_conv_prune_factor > 0:    
                 loss_conv = active_conv_rate * args.loss_conv_prune_factor
                 loss += loss_conv
@@ -240,11 +240,14 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, world_pn, t
         
         with torch.cuda.amp.autocast(enabled=args.use_amp, dtype=amp_dtype):
             with torch.no_grad():
-                set_forward_with_fms(model, False)
-                if mask is not None:
-                    out, _ = model((x, mask, threshold))
+                if args.v_type != "demo":
+                    set_forward_with_fms(model, False)
+                    if mask is not None:
+                        out, _ = model((x, mask, threshold))
+                    else:
+                        out, _ = model(x)
                 else:
-                    out, _ = model(x)
+                    out = model(x)
         top1, top5 = accuracy(out, y, topk=(1, 5))
         top1_total += top1[0] * x.size(0)
         top5_total += top5[0] * x.size(0)
