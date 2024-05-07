@@ -32,7 +32,8 @@ class Block(nn.Module):
         x = self.f(x)
         B, H, W, C = x.size()
         x1, x2 = x.reshape(B, H, W, 2, int(C // 2)).unbind(3)
-        x = self.act(x1) + x2 if self.mode == "sum" else self.act(x1) * x2
+        # x = self.act(x1) + x2 if self.mode == "sum" else self.act(x1) * x2
+        x = x1 + x2 if self.mode == "sum" else x1 * x2
         x = self.g(x)
         x = input + self.drop_path(self.gamma * x)
         return x
