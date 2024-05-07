@@ -16,7 +16,7 @@ class Block(nn.Module):
     def __init__(self, dim, drop_path=0., layer_scale_init_value=1e-6, mode="sum"):
         super().__init__()
         self.mode = mode
-        self.norm = nn.BatchNorm2d(14)
+        self.norm = nn.BatchNorm2d(dim)
         self.dwconv = nn.Conv2d(dim, dim, kernel_size=7, padding=3, groups=dim)  # depthwise conv
         self.f = nn.Linear(dim, 6 * dim)
         self.act = nn.GELU()
@@ -27,8 +27,9 @@ class Block(nn.Module):
 
     def forward(self, x):
         input = x
+        x = x.permute(0, 3, 1, 2)
         x = self.norm(x)
-        x = self.dwconv(x.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+        x = self.dwconv(x).permute(0, 2, 3, 1)
         x = self.f(x)
         B, H, W, C = x.size()
         x1, x2 = x.reshape(B, H, W, 2, int(C // 2)).unbind(3)
