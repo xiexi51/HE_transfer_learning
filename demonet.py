@@ -72,297 +72,297 @@ class DemoNet(nn.Module):
         return x
 
 
-@register_model
-def DemoNet_d12_w64_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=64, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w64_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=64, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w64_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=64, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w64_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=64, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w128_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=128, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w128_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=128, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w128_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=128, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w128_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=128, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w192_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=192, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w192_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=192, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w192_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=192, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w192_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=192, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w256_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=256, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w256_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=256, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w256_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=256, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w256_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=256, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w320_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=320, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w320_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=320, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w320_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=320, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w320_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=320, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w384_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=384, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w384_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=384, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w384_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=384, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w384_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=384, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w448_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=448, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w448_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=448, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w448_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=448, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w448_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=448, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w32_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=32, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w32_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=32, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w32_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=32, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w32_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=32, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w96_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=96, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w96_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=96, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w96_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=96, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w96_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=96, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w160_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=160, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w160_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=160, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w160_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=160, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w160_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=160, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w224_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=224, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w224_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=224, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w224_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=224, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w224_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=224, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w288_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=288, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w288_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=288, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w288_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=288, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w288_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=288, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w352_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=352, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w352_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=352, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w352_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=352, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w352_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=352, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w416_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=416, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w416_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=416, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w416_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=416, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w416_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=416, mode="sum", **kwargs)
+#     return model
 
 
-#### for depth evaluation ####
-@register_model
-def DemoNet_d6_w192_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=6, dim=192, mode="sum", **kwargs)
-    return model
+# #### for depth evaluation ####
+# @register_model
+# def DemoNet_d6_w192_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=6, dim=192, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d8_w192_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=8, dim=192, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d8_w192_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=8, dim=192, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d10_w192_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=10, dim=192, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d10_w192_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=10, dim=192, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w192_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=192, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w192_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=192, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d14_w192_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=14, dim=192, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d14_w192_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=14, dim=192, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d16_w192_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=16, dim=192, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d16_w192_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=16, dim=192, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d18_w192_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=18, dim=192, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d18_w192_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=18, dim=192, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d20_w192_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=20, dim=192, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d20_w192_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=20, dim=192, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d22_w192_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=22, dim=192, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d22_w192_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=22, dim=192, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d24_w192_sum(pretrained=False, **kwargs):
-    model = DemoNet(depth=24, dim=192, mode="sum", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d24_w192_sum(pretrained=False, **kwargs):
+#     model = DemoNet(depth=24, dim=192, mode="sum", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d6_w192_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=6, dim=192, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d6_w192_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=6, dim=192, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d8_w192_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=8, dim=192, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d8_w192_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=8, dim=192, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d10_w192_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=10, dim=192, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d10_w192_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=10, dim=192, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d12_w192_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=12, dim=192, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d12_w192_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=12, dim=192, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d14_w192_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=14, dim=192, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d14_w192_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=14, dim=192, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d16_w192_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=16, dim=192, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d16_w192_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=16, dim=192, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d18_w192_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=18, dim=192, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d18_w192_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=18, dim=192, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d20_w192_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=20, dim=192, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d20_w192_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=20, dim=192, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d22_w192_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=22, dim=192, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d22_w192_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=22, dim=192, mode="mul", **kwargs)
+#     return model
 
 
-@register_model
-def DemoNet_d24_w192_mul(pretrained=False, **kwargs):
-    model = DemoNet(depth=24, dim=192, mode="mul", **kwargs)
-    return model
+# @register_model
+# def DemoNet_d24_w192_mul(pretrained=False, **kwargs):
+#     model = DemoNet(depth=24, dim=192, mode="mul", **kwargs)
+#     return model
 
 
-if __name__ == "__main__":
-    model = DemoNet(depth=6, dim=224, mode="mul")
-    dummy_input = torch.rand(10, 3, 224, 224) 
-    y = model(dummy_input)
-    print(y.shape)
+# if __name__ == "__main__":
+#     model = DemoNet(depth=6, dim=224, mode="mul")
+#     dummy_input = torch.rand(10, 3, 224, 224) 
+#     y = model(dummy_input)
+#     print(y.shape)
