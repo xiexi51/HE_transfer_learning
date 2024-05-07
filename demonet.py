@@ -16,7 +16,7 @@ class Block(nn.Module):
     def __init__(self, dim, drop_path=0., layer_scale_init_value=1e-6, mode="sum"):
         super().__init__()
         self.mode = mode
-        self.norm = nn.LayerNorm(dim)
+        self.norm = nn.BatchNorm2d(dim)
         self.dwconv = nn.Conv2d(dim, dim, kernel_size=7, padding=3, groups=dim)  # depthwise conv
         self.f = nn.Linear(dim, 6 * dim)
         self.act = nn.GELU()
@@ -53,7 +53,7 @@ class DemoNet(nn.Module):
                                             layer_scale_init_value=layer_scale_init_value, mode=mode)
                                       for i in range(depth)])
 
-        self.norm = nn.LayerNorm(dim)  # final norm layer
+        self.norm = nn.BatchNorm2d(dim)  # final norm layer
         self.head = nn.Linear(dim, self.num_classes)
 
         self.apply(self._init_weights)
