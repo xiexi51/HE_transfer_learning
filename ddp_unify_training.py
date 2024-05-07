@@ -118,17 +118,23 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
                         out_t, fms_t, featuremap_t = model_t((x, -1, 1))
                     else:
                         out_t, fms_t, featuremap_t = model_t((x, -1, 1))
-
-            set_forward_with_fms(model_s, True)
-            if mask is not None:
-                out_s, fms_s, featuremap_s = model_s((x, mask_current, threshold_end))
+            if args.v_type != "demo":
+                set_forward_with_fms(model_s, True)
+                if mask is not None:
+                    out_s, fms_s, featuremap_s = model_s((x, mask_current, threshold_end))
+                else:
+                    out_s, featuremap_s = model_s(x)
             else:
-                out_s, featuremap_s = model_s(x)
+                out_s = model_s(x)
            
             loss = 0
 
-            total_conv, active_conv = model_s.module.get_conv_density()
-            active_conv_rate = active_conv / total_conv
+            if args.v_type != "demo":
+                total_conv, active_conv = model_s.module.get_conv_density()
+                active_conv_rate = active_conv / total_conv
+            else:
+                active_conv_rate = 1
+                
             if args.loss_conv_prune_factor > 0:    
                 loss_conv = active_conv_rate * args.loss_conv_prune_factor
                 loss += loss_conv

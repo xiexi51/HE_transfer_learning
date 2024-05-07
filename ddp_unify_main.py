@@ -27,6 +27,7 @@ from locals import proj_root
 import setproctitle
 import sys
 import torchvision
+from demonet import DemoNet
 
 def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
     lr = init_lr * (lr_gamma ** (epoch // lr_step_size))
@@ -68,22 +69,24 @@ def process(pn, args):
             label_smoothing=args.smoothing, num_classes=1000 )
 
     print("v_type = ", args.v_type)
-    if args.v_type <= 7 and args.v_type >= 5:
-        if args.v_type == 6:
+    if args.v_type in ["5", "6", "7"]:
+        if args.v_type == "6":
             vanillanet = vanillanet_6_full_unify
-        elif args.v_type == 7:
+        elif args.v_type == "7":
             vanillanet = vanillanet_7_full_unify
         else:
             vanillanet = vanillanet_5_full_unify
         model = vanillanet(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, args.prune_1_1_kernel, args.old_version, args.vanilla_shortcut, args.vanilla_keep_bn)
-    else:
+    elif args.v_type == "18":
         model = ResNet18AvgCustom(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, args.prune_1_1_kernel, args.if_wide)
         initialize_resnet(model)
+    else:
+        model = DemoNet(depth=10, dim=224, mode="mul")
 
     if args.teacher_file is not None:
-        if args.v_type <= 7 and args.v_type >= 5:
+        if args.v_type in ["5", "6", "7"]:
             model_t = vanillanet(args.teacher_act_relu_type, [0, 0, 0], [0, 0, 0], args.teacher_prune_type, args.teacher_prune_1_1_kernel, old_version=args.old_version, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
-        else:
+        elif args.v_type == "18":
             model_t = ResNet18AvgCustom(args.teacher_act_relu_type, [0, 0, 0], [0, 0, 0], args.teacher_prune_type, args.teacher_prune_1_1_kernel, args.if_wide)
             
             
@@ -99,17 +102,9 @@ def process(pn, args):
     else:
         model_t = None
     
-    dummy_input = torch.rand(10, 3, 224, 224) 
-    model((dummy_input, 0, 1))
-
-    if args.v_type <= 7 and args.v_type >= 5:
-        if isinstance(model, VanillaNet_deploy_poly):
-            raise ValueError("don't use deploy version")
-            assert args.deploy == True    
-            _msg = "create deploy model"
-        else:
-            _msg = "create full model"
-        print(f"{_msg}, shortcut = {args.vanilla_shortcut}, keep_bn = {args.vanilla_keep_bn}")
+    if args.v_type != "demo":
+        dummy_input = torch.rand(10, 3, 224, 224) 
+        model((dummy_input, 0, 1))
 
     checkpoint = None
 
@@ -188,9 +183,10 @@ def process(pn, args):
                 if not name.endswith("rand_mask"):
                     param.requires_grad = True
 
-    linear_features = model.linear.in_features
-    if args.dataset == "cifar10":
-        model.linear = torch.nn.Linear(linear_features, 10)
+    if args.v_type != "demo":
+        linear_features = model.linear.in_features
+        if args.dataset == "cifar10":
+            model.linear = torch.nn.Linear(linear_features, 10)
 
     if args.loss_conv_prune_factor == 0:
         for name, module in model.named_modules():
@@ -470,7 +466,7 @@ if __name__ == "__main__":
     parser.add_argument('--act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix', 'star'])
     parser.add_argument('--teacher_act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix', 'star'])
 
-    parser.add_argument('--v_type', type=int, default=5, choices = [5, 6, 7, 18])
+    parser.add_argument('--v_type', type=str, default="18", choices = ["5", "6", "7", "18", "demo"])
     parser.add_argument('--old_version', type=ast.literal_eval, default=False)
 
     parser.add_argument('--only_test', type=ast.literal_eval, default=False)
