@@ -90,18 +90,18 @@ class Conv2dPruned(nn.Conv2d):
 class BasicBlockAvgCustom(nn.Module):
     expansion = 1
 
-    def __init__(self, in_planes, planes, stride, relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel):
+    def __init__(self, in_planes, planes, stride, relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, out_features):
         super().__init__()
         self.conv1 = Conv2dPruned(prune_type, prune_1_1_kernel, in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(planes)
+        self.bn1 = nn.LayerNorm([planes, out_features, out_features])
         self.conv2 = Conv2dPruned(prune_type, prune_1_1_kernel, planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(planes)
+        self.bn2 = nn.LayerNorm([planes, out_features, out_features])
 
         self.shortcut = nn.Sequential()
         if stride != 1 or in_planes != self.expansion*planes:
             self.shortcut = nn.Sequential(
                 Conv2dPruned(prune_type, prune_1_1_kernel, in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm2d(self.expansion*planes)
+                nn.LayerNorm([self.expansion*planes, out_features, out_features])
             )
 
         self.relu1 = custom_relu(relu_type, poly_weight_inits, poly_factors, planes)
@@ -157,29 +157,29 @@ class ResNetAvgCustom(nn.Module):
         self.in_planes = 64
         self.conv1 = Conv2dPruned(prune_type, prune_1_1_kernel, 3, 64, kernel_size=7, stride=2, padding=3, bias=False)
 
-        self.bn1 = nn.BatchNorm2d(64)
+        self.bn1 = nn.LayerNorm([64, 112, 112])
         if not if_wide:
-            self.layer1 = self._create_blocks(block, 64, num_blocks[0], stride=1)
-            self.layer2 = self._create_blocks(block, 128, num_blocks[1], stride=2)
-            self.layer3 = self._create_blocks(block, 256, num_blocks[2], stride=2)
-            self.layer4 = self._create_blocks(block, 512, num_blocks[3], stride=2)
+            self.layer1 = self._create_blocks(block, 64, num_blocks[0], stride=1, out_features=56)
+            self.layer2 = self._create_blocks(block, 128, num_blocks[1], stride=2, out_features=28)
+            self.layer3 = self._create_blocks(block, 256, num_blocks[2], stride=2, out_features=14)
+            self.layer4 = self._create_blocks(block, 512, num_blocks[3], stride=2, out_features=7)
             self.linear = nn.Linear(512*block.expansion, num_classes)
         else:
-            self.layer1 = self._create_blocks(block, 128, num_blocks[0], stride=1)
-            self.layer2 = self._create_blocks(block, 256, num_blocks[1], stride=2)
-            self.layer3 = self._create_blocks(block, 512, num_blocks[2], stride=2)
-            self.layer4 = self._create_blocks(block, 1024, num_blocks[3], stride=2)
+            self.layer1 = self._create_blocks(block, 128, num_blocks[0], stride=1, out_features=56)
+            self.layer2 = self._create_blocks(block, 256, num_blocks[1], stride=2, out_features=28)
+            self.layer3 = self._create_blocks(block, 512, num_blocks[2], stride=2, out_features=14)
+            self.layer4 = self._create_blocks(block, 1024, num_blocks[3], stride=2, out_features=7)
             self.linear = nn.Linear(1024*block.expansion, num_classes)
 
         self.relu1 = custom_relu(relu_type, poly_weight_inits, poly_factors, 64)
 
         self.if_forward_with_fms = False
 
-    def _create_blocks(self, block, planes, num_blocks, stride):
+    def _create_blocks(self, block, planes, num_blocks, stride, out_features):
         strides = [stride] + [1]*(num_blocks-1)
         blocks = []
         for stride in strides:
-            blocks.append(block(self.in_planes, planes, stride, self.relu_type, self.poly_weight_inits, self.poly_factors, self.prune_type, self.prune_1_1_kernel))
+            blocks.append(block(self.in_planes, planes, stride, self.relu_type, self.poly_weight_inits, self.poly_factors, self.prune_type, self.prune_1_1_kernel, out_features))
             self.in_planes = planes * block.expansion
         return nn.Sequential(*blocks)
         
