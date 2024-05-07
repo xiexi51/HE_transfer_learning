@@ -375,9 +375,13 @@ def process(pn, args):
                 test_acc = ddp_test(args, testloader, model, epoch, best_acc, None, writer, world_pn, threshold_end)
 
         if pn == 0:
-            total, active = model.module.get_conv_density()
+            if args.v_type != "demo":
+                total, active = model.module.get_conv_density()
+                active_conv_rate = active / total
+            else:
+                active_conv_rate = 1
             with open(f"{log_dir}/acc.txt", 'a') as file:
-                file.write(f"{epoch} train {train_acc*100:.2f} test {test_acc*100:.2f} best {best_acc*100:.2f} Lr {optimizer.param_groups[0]['lr']:.2e} mask {mask_end:.4f} act_learn {act_learn:.2f} conv {active/total:.4f}\n")
+                file.write(f"{epoch} train {train_acc*100:.2f} test {test_acc*100:.2f} best {best_acc*100:.2f} Lr {optimizer.param_groups[0]['lr']:.2e} mask {mask_end:.4f} act_learn {act_learn:.2f} conv {active_conv_rate:.4f}\n")
             writer.flush()
         
         if lr_scheduler is not None:
