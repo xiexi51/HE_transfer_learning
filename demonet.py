@@ -16,7 +16,7 @@ class Block(nn.Module):
     def __init__(self, dim, drop_path=0., layer_scale_init_value=1e-6, mode="sum"):
         super().__init__()
         self.mode = mode
-        self.norm = nn.BatchNorm2d(dim)
+        self.norm = nn.BatchNorm2d(14)
         self.dwconv = nn.Conv2d(dim, dim, kernel_size=7, padding=3, groups=dim)  # depthwise conv
         self.f = nn.Linear(dim, 6 * dim)
         self.act = nn.GELU()
