@@ -28,6 +28,7 @@ import setproctitle
 import sys
 import torchvision
 from demonet import DemoNet
+from model_poly_avg import CustomSettings
 
 def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
     lr = init_lr * (lr_gamma ** (epoch // lr_step_size))
@@ -67,6 +68,8 @@ def process(pn, args):
             mixup_alpha=args.mixup, cutmix_alpha=args.cutmix, cutmix_minmax=args.cutmix_minmax,
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=1000 )
+        
+    model_custom_settings = CustomSettings(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, args.prune_1_1_kernel, args.norm_type)
 
     print("v_type = ", args.v_type)
     if args.v_type in ["5", "6", "7"]:
@@ -78,16 +81,18 @@ def process(pn, args):
             vanillanet = vanillanet_5_full_unify
         model = vanillanet(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, args.prune_1_1_kernel, args.old_version, args.vanilla_shortcut, args.vanilla_keep_bn)
     elif args.v_type == "18":
-        model = ResNet18AvgCustom(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, args.prune_1_1_kernel, args.if_wide)
+        model = ResNet18AvgCustom(model_custom_settings, args.if_wide)
         initialize_resnet(model)
     else:
         model = DemoNet(depth=10, dim=224, mode="mul")
+
+    teacher_custom_settings = CustomSettings(args.teacher_act_relu_type, [0, 0, 0], [0, 0, 0], args.teacher_prune_type, args.teacher_prune_1_1_kernel, args.teacher_norm_type)
 
     if args.teacher_file is not None:
         if args.v_type in ["5", "6", "7"]:
             model_t = vanillanet(args.teacher_act_relu_type, [0, 0, 0], [0, 0, 0], args.teacher_prune_type, args.teacher_prune_1_1_kernel, old_version=args.old_version, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
         elif args.v_type == "18":
-            model_t = ResNet18AvgCustom(args.teacher_act_relu_type, [0, 0, 0], [0, 0, 0], args.teacher_prune_type, args.teacher_prune_1_1_kernel, args.if_wide)
+            model_t = ResNet18AvgCustom(teacher_custom_settings, args.if_wide)
             
             
         print(f"Loading teacher: {args.teacher_file}")     
@@ -487,6 +492,8 @@ if __name__ == "__main__":
     parser.add_argument('--teacher_prune_type', type=str, default='None', choices=['group_pixel', 'channel', 'pixel', 'fixed_channel', 'None'])
     parser.add_argument('--prune_1_1_kernel', type=ast.literal_eval, default=False)
     parser.add_argument('--teacher_prune_1_1_kernel', type=ast.literal_eval, default=False)
+    parser.add_argument('--norm_type', type=str, default='layernorm', choices=['my_layernorm', 'layernorm', 'batchnorm'])
+    parser.add_argument('--teacher_norm_type', type=str, default='layernorm', choices=['my_layernorm', 'layernorm', 'batchnorm'])
 
     parser.add_argument('--freeze_linear', type=ast.literal_eval, default=False)
     parser.add_argument('--freeze_relu', type=ast.literal_eval, default=False)

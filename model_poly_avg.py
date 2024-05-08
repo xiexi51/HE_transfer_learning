@@ -3,15 +3,25 @@ import torch.nn as nn
 import torch.nn.functional as F
 from model import fix_relu_poly, general_relu_poly, star_relu
 from utils import STEFunction
+from norm_class import MyLayerNorm
+
+class CustomSettings:
+    def __init__(self, relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, norm_type):
+        self.relu_type = relu_type
+        self.poly_weight_inits = poly_weight_inits
+        self.poly_factors = poly_factors
+        self.prune_type = prune_type
+        self.prune_1_1_kernel = prune_1_1_kernel
+        self.norm_type = norm_type
     
 class custom_relu(nn.Module):
-    def __init__(self, relu_type, poly_weight_inits, poly_factors, num_channels):
+    def __init__(self, custom_settings, num_channels):
         super().__init__()
-        if relu_type == "channel":
-            self.relu = general_relu_poly(if_channel=True, if_pixel=True, weight_inits=poly_weight_inits, factors=poly_factors, num_channels=num_channels)
-        elif relu_type == "fix":
-            self.relu = fix_relu_poly(if_pixel=True, factors=poly_factors)
-        elif relu_type == "star":
+        if custom_settings.relu_type == "channel":
+            self.relu = general_relu_poly(if_channel=True, if_pixel=True, weight_inits=custom_settings.poly_weight_inits, factors=custom_settings.poly_factors, num_channels=num_channels)
+        elif custom_settings.relu_type == "fix":
+            self.relu = fix_relu_poly(if_pixel=True, factors=custom_settings.poly_factors)
+        elif custom_settings.relu_type == "star":
             self.relu = star_relu(num_channels)
         else:
             self.relu = nn.ReLU()
@@ -27,10 +37,10 @@ class custom_relu(nn.Module):
         return self.relu.get_relu_density(mask)
 
 class Conv2dPruned(nn.Conv2d):
-    def __init__(self, prune_type, prune_1_1_kernel, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
+    def __init__(self, custom_settings, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
         super().__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
-        self.prune_type = prune_type
-        self.prune_1_1_kernel = prune_1_1_kernel
+        self.prune_type = custom_settings.prune_type
+        self.prune_1_1_kernel = custom_settings.prune_1_1_kernel
         self.granularity = 8
         self.group_granularity = 8
         self.weight_aux = None
@@ -90,22 +100,36 @@ class Conv2dPruned(nn.Conv2d):
 class BasicBlockAvgCustom(nn.Module):
     expansion = 1
 
-    def __init__(self, in_planes, planes, stride, relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, out_features):
+    def __init__(self, in_planes, planes, stride, custom_settings, out_features):
         super().__init__()
-        self.conv1 = Conv2dPruned(prune_type, prune_1_1_kernel, in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
-        self.bn1 = nn.LayerNorm([planes, out_features, out_features])
-        self.conv2 = Conv2dPruned(prune_type, prune_1_1_kernel, planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn2 = nn.LayerNorm([planes, out_features, out_features])
+        if custom_settings.norm_type == "my_layernorm":
+            self.norm1 = MyLayerNorm([planes, out_features, out_features])
+            self.norm2 = MyLayerNorm([planes, out_features, out_features])
+        elif custom_settings.norm_type == "batchnorm":
+            self.norm1 = nn.BatchNorm2d(planes)
+            self.norm2 = nn.BatchNorm2d(planes)
+        else:
+            self.norm1 = nn.LayerNorm([planes, out_features, out_features])
+            self.norm2 = nn.LayerNorm([planes, out_features, out_features])
+            
+        self.conv1 = Conv2dPruned(custom_settings, in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.conv2 = Conv2dPruned(custom_settings, planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
 
         self.shortcut = nn.Sequential()
         if stride != 1 or in_planes != self.expansion*planes:
+            if custom_settings.norm_type == "my_layernorm":
+                self.shortcut_norm = MyLayerNorm([self.expansion*planes, out_features, out_features])
+            elif custom_settings.norm_type == "batchnorm":
+                self.shortcut_norm = nn.BatchNorm2d(self.expansion*planes)
+            else:
+                self.shortcut_norm = nn.LayerNorm([self.expansion*planes, out_features, out_features])
             self.shortcut = nn.Sequential(
-                Conv2dPruned(prune_type, prune_1_1_kernel, in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
-                nn.LayerNorm([self.expansion*planes, out_features, out_features])
+                Conv2dPruned(custom_settings, in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
+                self.shortcut_norm
             )
 
-        self.relu1 = custom_relu(relu_type, poly_weight_inits, poly_factors, planes)
-        self.relu2 = custom_relu(relu_type, poly_weight_inits, poly_factors, planes)
+        self.relu1 = custom_relu(custom_settings, planes)
+        self.relu2 = custom_relu(custom_settings, planes)
 
     def forward(self, x, mask, threshold):
         fms = []
@@ -117,12 +141,12 @@ class BasicBlockAvgCustom(nn.Module):
             shortcut = self.shortcut(x)
 
         out = self.conv1(x, threshold)
-        out = self.bn1(out)
+        out = self.norm1(out)
         out = self.relu1(out, mask)
         fms.append(out)
         
         out = self.conv2(out, threshold)
-        out = self.bn2(out)
+        out = self.norm2(out)
         out += shortcut
         out = self.relu2(out, mask)
         fms.append(out)
@@ -132,32 +156,23 @@ class BasicBlockAvgCustom(nn.Module):
         total1, relu1 = self.relu1.get_relu_density(mask)
         total2, relu2 = self.relu2.get_relu_density(mask)
         return total1 + total2, relu1 + relu2
-    
-    def get_conv_density(self):
-        total1, active1 = self.conv1.get_conv_density()
-        total2, active2 = self.conv2.get_conv_density()
-        if len(self.shortcut._modules) > 0:
-            total3, active3 = self.shortcut[0].get_conv_density()
-        else:
-            total3, active3 = 0, 0
-            
-        return total1 + total2 + total3, active1 + active2 + active3
 
 class ResNetAvgCustom(nn.Module):
-    def __init__(self, block, num_blocks, num_classes, relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, if_wide):
+    def __init__(self, block, num_blocks, num_classes, custom_settings, if_wide):
         super().__init__()
-        self.relu_type = relu_type
-        self.poly_weight_inits = poly_weight_inits
-        self.poly_factors = poly_factors
-        self.prune_type = prune_type
-        self.prune_1_1_kernel = prune_1_1_kernel
-
+        self.custom_settings = custom_settings
         self.avgpool = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
 
         self.in_planes = 64
-        self.conv1 = Conv2dPruned(prune_type, prune_1_1_kernel, 3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.conv1 = Conv2dPruned(custom_settings, 3, 64, kernel_size=7, stride=2, padding=3, bias=False)
 
-        self.bn1 = nn.LayerNorm([64, 112, 112])
+        if custom_settings.norm_type == "my_layernorm":
+            self.norm1 = MyLayerNorm([64, 112, 112])
+        elif custom_settings.norm_type == "batchnorm":
+            self.norm1 = nn.BatchNorm2d(64)
+        else:
+            self.norm1 = nn.LayerNorm([64, 112, 112])
+
         if not if_wide:
             self.layer1 = self._create_blocks(block, 64, num_blocks[0], stride=1, out_features=56)
             self.layer2 = self._create_blocks(block, 128, num_blocks[1], stride=2, out_features=28)
@@ -171,15 +186,14 @@ class ResNetAvgCustom(nn.Module):
             self.layer4 = self._create_blocks(block, 1024, num_blocks[3], stride=2, out_features=7)
             self.linear = nn.Linear(1024*block.expansion, num_classes)
 
-        self.relu1 = custom_relu(relu_type, poly_weight_inits, poly_factors, 64)
-
+        self.relu1 = custom_relu(custom_settings, 64)
         self.if_forward_with_fms = False
 
     def _create_blocks(self, block, planes, num_blocks, stride, out_features):
         strides = [stride] + [1]*(num_blocks-1)
         blocks = []
         for stride in strides:
-            blocks.append(block(self.in_planes, planes, stride, self.relu_type, self.poly_weight_inits, self.poly_factors, self.prune_type, self.prune_1_1_kernel, out_features))
+            blocks.append(block(self.in_planes, planes, stride, self.custom_settings, out_features))
             self.in_planes = planes * block.expansion
         return nn.Sequential(*blocks)
         
@@ -189,7 +203,7 @@ class ResNetAvgCustom(nn.Module):
         fms = []
         
         out = self.conv1(x, threshold)
-        out = self.bn1(out)
+        out = self.norm1(out)
         out = self.relu1(out, mask)
         fms.append(out)
 
@@ -234,7 +248,7 @@ class ResNetAvgCustom(nn.Module):
                     active += _active
         return total, active
         
-def ResNet18AvgCustom(relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, if_wide):
-    return ResNetAvgCustom(BasicBlockAvgCustom, [2, 2, 2, 2], 1000, relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, if_wide)
+def ResNet18AvgCustom(custom_settings, if_wide):
+    return ResNetAvgCustom(BasicBlockAvgCustom, [2, 2, 2, 2], 1000, custom_settings, if_wide)
 
 
