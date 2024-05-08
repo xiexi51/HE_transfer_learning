@@ -3,7 +3,7 @@ from typing import Union, List
 import torch
 from torch import nn, Size
 
-from labml_helpers.module import Module
+from torch.nn import Module
 
 
 class MyLayerNorm(Module):
@@ -57,19 +57,3 @@ class MyLayerNorm(Module):
 
         #
         return x_norm
-
-
-def _test():
-    
-    x = torch.rand([2, 3, 2, 4])
-
-    my_layer_norm = MyLayerNorm(x.size()[1:])
-    y1 = my_layer_norm(x)
-
-    torch_layer_norm = nn.LayerNorm(x.size()[1:])
-    y2 = torch_layer_norm(x)
-
-    print(torch.allclose(y1, y2))
-    
-if __name__ == '__main__':
-    _test()
