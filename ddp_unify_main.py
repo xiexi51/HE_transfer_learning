@@ -109,6 +109,7 @@ def process(pn, args):
     
     if args.v_type != "demo":
         dummy_input = torch.rand(10, 3, 224, 224) 
+        model.eval()
         model((dummy_input, 0, 1))
 
     checkpoint = None

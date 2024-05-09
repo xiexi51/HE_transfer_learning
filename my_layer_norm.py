@@ -19,6 +19,9 @@ class MyLayerNorm(Module):
             normalized_shape = torch.Size(normalized_shape)
         assert isinstance(normalized_shape, torch.Size)
 
+        self.num_batches_tracked = nn.Parameter(torch.zeros(1), requires_grad=False)
+        self.running_mean_var = nn.Parameter(torch.zeros(1), requires_grad=False)
+
         self.normalized_shape = normalized_shape
         self.eps = eps
         self.elementwise_affine = elementwise_affine
@@ -28,12 +31,12 @@ class MyLayerNorm(Module):
             self.bias = nn.Parameter(torch.zeros(normalized_shape))
 
     def forward(self, x: torch.Tensor):
-        """
-        `x` is a tensor of shape `[*, S[0], S[1], ..., S[n]]`.
-        `*` could be any number of dimensions.
-         For example, in an NLP task this will be
-        `[seq_len, batch_size, features]`
-        """
+        exponential_average_factor = 0.0
+
+        if self.training:
+            self.num_batches_tracked.data += 1
+            exponential_average_factor = 1.0 / float(self.num_batches_tracked)
+
         # Sanity check to make sure the shapes match
         assert self.normalized_shape == x.shape[-len(self.normalized_shape):]
 
@@ -49,11 +52,18 @@ class MyLayerNorm(Module):
         # Variance of all element $Var[X] = \mathbb{E}[X^2] - \mathbb{E}[X]^2$
         var = mean_x2 - mean ** 2
 
-        # Normalize $$\hat{X} = \frac{X - \mathbb{E}[X]}{\sqrt{Var[X] + \epsilon}}$$
+        with torch.no_grad():
+            if self.training:
+                mean_var = var.mean()
+                n = x.numel()
+                self.running_mean_var.data = exponential_average_factor * mean_var * n / (n - 1) + (1 - exponential_average_factor) * self.running_mean_var
+            else:
+                var = self.running_mean_var
+
         x_norm = (x - mean) / torch.sqrt(var + self.eps)
+
         # Scale and shift $$\text{LN}(x) = \gamma \hat{X} + \beta$$
         if self.elementwise_affine:
             x_norm = self.gain * x_norm + self.bias
 
-        #
         return x_norm

@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from model import fix_relu_poly, general_relu_poly, star_relu
 from utils import STEFunction
-from norm_class import MyLayerNorm
+from my_layer_norm import MyLayerNorm
 
 class CustomSettings:
     def __init__(self, relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, norm_type):
