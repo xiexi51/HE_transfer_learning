@@ -48,9 +48,9 @@ class MyLayerNorm(Module):
         mean = x.mean(dim=dims, keepdim=True)
         # Calculate the squared mean of all elements;
         # i.e. the means for each element $\mathbb{E}[X^2]$
-        mean_x2 = (x ** 2).mean(dim=dims, keepdim=True)
+        # mean_x2 = (x ** 2).mean(dim=dims, keepdim=True)
         # Variance of all element $Var[X] = \mathbb{E}[X^2] - \mathbb{E}[X]^2$
-        var = mean_x2 - mean ** 2
+        # var = mean_x2 - mean ** 2
 
         with torch.no_grad():
             if self.training:
@@ -58,9 +58,9 @@ class MyLayerNorm(Module):
                 n = x.numel() / x.size(1)
                 self.running_batch_var.data = exponential_average_factor * batch_var * n / (n - 1) + (1 - exponential_average_factor) * self.running_batch_var
             else:
-                var = self.running_batch_var[None, :, None, None]
+                batch_var = self.running_batch_var
 
-        x_norm = (x - mean) / torch.sqrt(var + self.eps)
+        x_norm = (x - mean) / torch.sqrt(batch_var[None, :, None, None] + self.eps)
 
         # Scale and shift $$\text{LN}(x) = \gamma \hat{X} + \beta$$
         if self.elementwise_affine:
