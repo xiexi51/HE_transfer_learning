@@ -20,7 +20,7 @@ class MyLayerNorm(Module):
         assert isinstance(normalized_shape, torch.Size)
 
         self.num_batches_tracked = nn.Parameter(torch.zeros(1), requires_grad=False)
-        self.running_mean_var = nn.Parameter(torch.zeros(1), requires_grad=False)
+        self.running_batch_var = nn.Parameter(torch.zeros(normalized_shape[0]), requires_grad=False)
 
         self.normalized_shape = normalized_shape
         self.eps = eps
@@ -54,11 +54,11 @@ class MyLayerNorm(Module):
 
         with torch.no_grad():
             if self.training:
-                mean_var = var.mean()
-                n = x.numel()
-                self.running_mean_var.data = exponential_average_factor * mean_var * n / (n - 1) + (1 - exponential_average_factor) * self.running_mean_var
+                batch_var = x.var([0, 2, 3], unbiased=False)
+                n = x.numel() / x.size(1)
+                self.running_batch_var.data = exponential_average_factor * batch_var * n / (n - 1) + (1 - exponential_average_factor) * self.running_batch_var
             else:
-                var = self.running_mean_var
+                var = self.running_batch_var[None, :, None, None]
 
         x_norm = (x - mean) / torch.sqrt(var + self.eps)
 
