@@ -13,6 +13,7 @@ from timm.data import Mixup
 from timm.utils import ModelEma
 from vanillanet_deploy_poly import VanillaNet_deploy_poly
 from typing import Tuple
+from my_layer_norm import MyLayerNorm
 
 def set_forward_with_fms(model, if_forward_with_fms):
     if isinstance(model, DistributedDataParallel):
@@ -126,6 +127,25 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
                     out_s, featuremap_s = model_s(x)
             else:
                 out_s = model_s(x)
+
+            # if iter == 100:
+            #     for name, module in model_s.module.named_modules():
+            #         if isinstance(module, MyLayerNorm):
+            #             max_val = float('-inf')
+            #             min_val = float('inf')
+            #             sum_val = 0
+            #             count = 0
+
+            #             for var in module.train_var_list:
+            #                 max_val = max(max_val, var.max().item())
+            #                 min_val = min(min_val, var.min().item())
+            #                 sum_val += var.sum().item()
+            #                 count += var.numel()
+
+            #             mean_val = sum_val / count if count > 0 else float('nan')
+
+            #             print(f"For module {name}: var_list max {max_val}, min {min_val}, mean {mean_val}")
+            #     break
            
             loss = 0
 
@@ -235,7 +255,7 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, world_pn, t
     else:
         amp_dtype = torch.float16
 
-    for x, y in pbar:
+    for iter, (x, y) in enumerate(pbar):
         x, y = x.cuda(), y.cuda()
         
         with torch.cuda.amp.autocast(enabled=args.use_amp, dtype=amp_dtype):
@@ -248,6 +268,26 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, world_pn, t
                         out, _ = model(x)
                 else:
                     out = model(x)
+
+        # if iter == 100:
+        #     for name, module in model.module.named_modules():
+        #         if isinstance(module, MyLayerNorm):
+        #             max_val = float('-inf')
+        #             min_val = float('inf')
+        #             sum_val = 0
+        #             count = 0
+
+        #             for var in module.test_var_list:
+        #                 max_val = max(max_val, var.max().item())
+        #                 min_val = min(min_val, var.min().item())
+        #                 sum_val += var.sum().item()
+        #                 count += var.numel()
+
+        #             mean_val = sum_val / count if count > 0 else float('nan')
+
+        #             print(f"For module {name}: var_list max {max_val}, min {min_val}, mean {mean_val}")
+        #     break
+        
         top1, top5 = accuracy(out, y, topk=(1, 5))
         top1_total += top1[0] * x.size(0)
         top5_total += top5[0] * x.size(0)

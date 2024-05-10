@@ -69,7 +69,7 @@ def process(pn, args):
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=1000 )
         
-    model_custom_settings = CustomSettings(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, args.prune_1_1_kernel, args.norm_type)
+    model_custom_settings = CustomSettings(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, args.prune_1_1_kernel, args.norm_type, args.cn)
 
     print("v_type = ", args.v_type)
     if args.v_type in ["5", "6", "7"]:
@@ -86,7 +86,7 @@ def process(pn, args):
     else:
         model = DemoNet(depth=10, dim=224, mode="mul")
 
-    teacher_custom_settings = CustomSettings(args.teacher_act_relu_type, [0, 0, 0], [0, 0, 0], args.teacher_prune_type, args.teacher_prune_1_1_kernel, args.teacher_norm_type)
+    teacher_custom_settings = CustomSettings(args.teacher_act_relu_type, [0, 0, 0], [0, 0, 0], args.teacher_prune_type, args.teacher_prune_1_1_kernel, args.teacher_norm_type, args.cn)
 
     if args.teacher_file is not None:
         if args.v_type in ["5", "6", "7"]:
@@ -107,10 +107,10 @@ def process(pn, args):
     else:
         model_t = None
     
-    if args.v_type != "demo":
-        dummy_input = torch.rand(10, 3, 224, 224) 
-        model.eval()
-        model((dummy_input, 0, 1))
+    # if args.v_type != "demo":
+    #     dummy_input = torch.rand(10, 3, 224, 224) 
+    #     model.eval()
+    #     model((dummy_input, 0, 1))
 
     checkpoint = None
 
@@ -380,6 +380,8 @@ def process(pn, args):
             else:
                 test_acc = ddp_test(args, testloader, model, epoch, best_acc, None, writer, world_pn, threshold_end)
 
+        # break
+
         if pn == 0:
             if args.v_type != "demo":
                 total, active = model.module.get_conv_density()
@@ -478,6 +480,8 @@ if __name__ == "__main__":
 
     parser.add_argument('--v_type', type=str, default="18", choices = ["5", "6", "7", "18", "demo"])
     parser.add_argument('--old_version', type=ast.literal_eval, default=False)
+
+    parser.add_argument('--cn', type=int, default=0)
 
     parser.add_argument('--only_test', type=ast.literal_eval, default=False)
 

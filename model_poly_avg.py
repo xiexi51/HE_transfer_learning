@@ -6,13 +6,14 @@ from utils import STEFunction
 from my_layer_norm import MyLayerNorm
 
 class CustomSettings:
-    def __init__(self, relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, norm_type):
+    def __init__(self, relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, norm_type, cn):
         self.relu_type = relu_type
         self.poly_weight_inits = poly_weight_inits
         self.poly_factors = poly_factors
         self.prune_type = prune_type
         self.prune_1_1_kernel = prune_1_1_kernel
         self.norm_type = norm_type
+        self.cn = cn
     
 class custom_relu(nn.Module):
     def __init__(self, custom_settings, num_channels):
@@ -188,6 +189,13 @@ class ResNetAvgCustom(nn.Module):
 
         self.relu1 = custom_relu(custom_settings, 64)
         self.if_forward_with_fms = False
+
+        self.num_layernorms = 0
+        for i, module in enumerate(self.modules()):
+            if isinstance(module, MyLayerNorm):
+                module.number = i
+                self.num_layernorms += 1
+                module.cn = self.custom_settings.cn
 
     def _create_blocks(self, block, planes, num_blocks, stride, out_features):
         strides = [stride] + [1]*(num_blocks-1)
