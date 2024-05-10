@@ -106,11 +106,14 @@ class MyLayerNorm(Module):
                 self.test_var_list.append(var + self.eps)
 
         if self.training:
-            with torch.no_grad():
-                self.running_var_mean.data = exponential_average_factor * torch.mean(var) + (1 - exponential_average_factor) * self.running_var_mean
+            # with torch.no_grad():
+            #     self.running_var_mean.data = exponential_average_factor * torch.mean(var) + (1 - exponential_average_factor) * self.running_var_mean
             x_norm = (x - mean) / torch.sqrt(var + self.eps)
         else:
-            x_norm = (x - mean) * Cheb((var + self.eps)/self.running_var_mean, 0.02, 2, cn=self.cn) / torch.sqrt(self.running_var_mean)
+            var_mean = var.mean()
+            x_norm = (x - mean) * Cheb((var / var_mean + self.eps), 0.02, 2, cn=self.cn) / torch.sqrt(var_mean)
+
+            # x_norm = (x - mean) / torch.sqrt(var + self.eps)
 
         # x_norm = (x - mean) / torch.sqrt(var + self.eps)
 
