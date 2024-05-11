@@ -108,15 +108,13 @@ class MyLayerNorm(Module):
         #     if len(self.test_var_list) < 1000:
         #         self.test_var_list.append(var + self.eps)
 
-        cheb_result = self.cheb.calculate(var + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
-
         if self.training and not self.training_use_cheb:
             # with torch.no_grad():
             #     self.running_var_mean.data = exponential_average_factor * torch.mean(var) + (1 - exponential_average_factor) * self.running_var_mean
             x_norm = (x - mean) / torch.sqrt(var + self.eps)
         else:
             var_mean = var.mean()
-            cheb_result = self.cheb.calculate(var / var_mean + self.eps, self.cheb_params[0], self.cheb_params[1], self.cheb_params[2])
+            cheb_result = self.cheb.calculate(var / var_mean + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
             x_norm = (x - mean) * cheb_result / torch.sqrt(var_mean)
 
         # Scale and shift $$\text{LN}(x) = \gamma \hat{X} + \beta$$
