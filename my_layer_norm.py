@@ -13,7 +13,7 @@ def Cheb(input, a, b, cn=3):
     elif cn == 2:
         c = torch.tensor([ 1.96851567, -1.07614785], device=device)
     elif cn == 3:
-        c = torch.tensor([ 2.14616615, -1.48026126,  0.58442854], device=device)
+        c = torch.tensor([ 1.08122509, -0.71963818,  0.27800576], device=device)
     elif cn == 4:
         c = torch.tensor([ 2.23027669, -1.66487833,  0.82379455, -0.35346759], device=device)
     elif cn == 5:
@@ -111,7 +111,7 @@ class MyLayerNorm(Module):
             x_norm = (x - mean) / torch.sqrt(var + self.eps)
         else:
             var_mean = var.mean()
-            x_norm = (x - mean) * Cheb((var / var_mean + self.eps), 0.02, 2, cn=self.cn) / torch.sqrt(var_mean)
+            x_norm = (x - mean) * Cheb((var / var_mean + self.eps), 0.1, 3, cn=self.cn) / torch.sqrt(var_mean)
 
             # x_norm = (x - mean) / torch.sqrt(var + self.eps)
 

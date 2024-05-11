@@ -137,13 +137,14 @@ def process(pn, args):
         if checkpoint_path and os.path.exists(checkpoint_path):
             print(f"Loading checkpoint: {checkpoint_path}")
             state_dict = torch.load(checkpoint_path)['model_state_dict']
-            new_state_dict = {}
-            for key, value in state_dict.items():
-                new_key = re.sub(r'layer(\d+)_(\d+)', r'layer\1.\2', key)
-                new_key = re.sub(r'(\.relu)(\d+)\.', r'\1\2.relu.', new_key)
-                new_key = re.sub(r'(^relu)(\d+)\.', r'\1\2.relu.', new_key)
-                new_state_dict[new_key] = value
-            model.load_state_dict(new_state_dict, strict=False)
+            # new_state_dict = {}
+            # for key, value in state_dict.items():
+            #     new_key = re.sub(r'layer(\d+)_(\d+)', r'layer\1.\2', key)
+            #     new_key = re.sub(r'(\.relu)(\d+)\.', r'\1\2.relu.', new_key)
+            #     new_key = re.sub(r'(^relu)(\d+)\.', r'\1\2.relu.', new_key)
+            #     new_state_dict[new_key] = value
+            # model.load_state_dict(new_state_dict, strict=False)
+            model.load_state_dict(state_dict, strict=False)
         else:
             print(f"No checkpoint found at {checkpoint_path}")
 
