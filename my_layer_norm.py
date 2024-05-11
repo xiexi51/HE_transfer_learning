@@ -109,7 +109,7 @@ class MyLayerNorm(Module):
         var_normed = var / var_mean
         bins = [-np.inf, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, np.inf]
         counts, _ = np.histogram(var_normed.detach().cpu().numpy(), bins=bins)
-        
+
         if self.training:
             if self.counts_train is None:
                 self.counts_train = counts
@@ -133,7 +133,11 @@ class MyLayerNorm(Module):
             #     self.running_var_mean.data = exponential_average_factor * torch.mean(var) + (1 - exponential_average_factor) * self.running_var_mean
             x_norm = (x - mean) / torch.sqrt(var + self.eps)
         else:
-            cheb_result = self.cheb.calculate(var / var_mean + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
+            cheb_result = self.cheb.calculate(var_normed + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
+            if self.training:
+                var_mask = var_normed > 3
+                cheb_result[var_mask] = 1.0 / torch.sqrt(var_normed[var_mask] + self.eps)
+
             x_norm = (x - mean) * cheb_result / torch.sqrt(var_mean)
 
         # Scale and shift $$\text{LN}(x) = \gamma \hat{X} + \beta$$
