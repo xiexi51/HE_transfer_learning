@@ -356,9 +356,6 @@ def process(pn, args):
                     # 否则，将 counts 加到 total_counts 上
                     total_counts += counts
 
-        # 计算各区间的比例，并保留2位小数
-        total_counts = total_counts / total_counts.sum()
-        total_counts = np.round(total_counts, 2)
 
         # 在一行内打印结果
         print(" ".join(map(str, total_counts)))
