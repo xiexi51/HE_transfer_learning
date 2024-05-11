@@ -1,58 +1,61 @@
 from typing import Union, List
-
 import torch
 from torch import nn, Size
-
 from torch.nn import Module
+from numpy.polynomial import Chebyshev
 
-def Cheb(input, a, b, cn=3):
-    device = input.device
+class MyCheb():
+    def __init__(self):
+        self.store_degree = None
+        self.store_a = None
+        self.store_b = None
+        self.coeffs = None
 
-    if cn == 0:
-        return 1 / torch.sqrt(input)
-    elif cn == 2:
-        c = torch.tensor([ 1.96851567, -1.07614785], device=device)
-    elif cn == 3:
-        c = torch.tensor([ 1.08122509, -0.71963818,  0.27800576], device=device)
-    elif cn == 4:
-        c = torch.tensor([ 2.23027669, -1.66487833,  0.82379455, -0.35346759], device=device)
-    elif cn == 5:
-        c = torch.tensor([ 2.2708268 , -1.7526131 ,  0.93297679, -0.50419129,  0.22388761], device=device)
-    elif cn == 6:
-        c = torch.tensor([ 2.29051981, -1.79490704,  0.98453865, -0.57316873,  0.32200415, -0.14559046], device=device)
-    else:
-        raise ValueError("Chebyshev polynomial of order {} not implemented".format(cn))
+    def get_coeffs(self, degree, a, b, device):
+        f = lambda x: x**-0.5
+        f_mapped = lambda x: f((b - a)/2 * x + (b + a)/2)
+        nodes = Chebyshev.basis(degree + 1).roots()
+        nodes_mapped = (b - a)/2 * nodes + (b + a)/2
+        values = f(nodes_mapped)
+        self.coeffs = torch.tensor(Chebyshev.fit(nodes, values, degree).convert().coef, device=device)
+        self.store_degree = degree
+        self.store_a = a
+        self.store_b = b
     
-    with torch.no_grad():
-        x = (2*input - a - b)/(b - a)
-
-        x2 = 2*x
-
-        if len(c) == 1:
-            c0 = c[0]
-            c1 = 0
-        elif len(c) == 2:
-            c0 = c[0]
-            c1 = c[1]
-        else:
+    def calculate(self, input, degree, a, b):
+        if degree == -1:
+            return 1 / torch.sqrt(input)
+        if not (degree == self.store_degree and a == self.store_a and b == self.store_b):
+            self.get_coeffs(degree, a, b, input.device)
+        
+        with torch.no_grad():
+            x = (2*input - a - b)/(b - a)
             x2 = 2*x
-            c0 = c[-2]
-            c1 = c[-1]
-            for i in range(3, len(c) + 1):
-                tmp = c0
-                c0 = c[-i] - c1
-                c1 = tmp + c1*x2
 
-    return c0 + c1*x
+            if len(self.coeffs) == 1:
+                c0 = self.coeffs[0]
+                c1 = 0
+            elif len(self.coeffs) == 2:
+                c0 = self.coeffs[0]
+                c1 = self.coeffs[1]
+            else:
+                x2 = 2*x
+                c0 = self.coeffs[-2]
+                c1 = self.coeffs[-1]
+                for i in range(3, len(self.coeffs) + 1):
+                    tmp = c0
+                    c0 = self.coeffs[-i] - c1
+                    c1 = tmp + c1*x2
+        return c0 + c1*x
 
 class MyLayerNorm(Module):
-    def __init__(self, normalized_shape: Union[int, List[int], Size], *,
-                 eps: float = 1e-5,
-                 elementwise_affine: bool = True):
+    def __init__(self, normalized_shape: Union[int, List[int], Size], *, eps: float = 1e-5, elementwise_affine: bool = True):
         super().__init__()
 
         self.number = 0
-        self.cn = 3
+        self.cheb_params = [4, 0.1, 5]
+        self.training_use_cheb = False
+        self.cheb = MyCheb()
 
         # Convert `normalized_shape` to `torch.Size`
         if isinstance(normalized_shape, int):
@@ -98,24 +101,23 @@ class MyLayerNorm(Module):
         # Variance of all element $Var[X] = \mathbb{E}[X^2] - \mathbb{E}[X]^2$
         var = mean_x2 - mean ** 2
         
-        if self.training:
-            if len(self.train_var_list) < 1000:
-                self.train_var_list.append(var + self.eps)
-        else:
-            if len(self.test_var_list) < 1000:
-                self.test_var_list.append(var + self.eps)
+        # if self.training:
+        #     if len(self.train_var_list) < 1000:
+        #         self.train_var_list.append(var + self.eps)
+        # else:
+        #     if len(self.test_var_list) < 1000:
+        #         self.test_var_list.append(var + self.eps)
 
-        if self.training:
+        cheb_result = self.cheb.calculate(var + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
+
+        if self.training and not self.training_use_cheb:
             # with torch.no_grad():
             #     self.running_var_mean.data = exponential_average_factor * torch.mean(var) + (1 - exponential_average_factor) * self.running_var_mean
             x_norm = (x - mean) / torch.sqrt(var + self.eps)
         else:
             var_mean = var.mean()
-            x_norm = (x - mean) * Cheb((var / var_mean + self.eps), 0.1, 3, cn=self.cn) / torch.sqrt(var_mean)
-
-            # x_norm = (x - mean) / torch.sqrt(var + self.eps)
-
-        # x_norm = (x - mean) / torch.sqrt(var + self.eps)
+            cheb_result = self.cheb.calculate(var / var_mean + self.eps, self.cheb_params[0], self.cheb_params[1], self.cheb_params[2])
+            x_norm = (x - mean) * cheb_result / torch.sqrt(var_mean)
 
         # Scale and shift $$\text{LN}(x) = \gamma \hat{X} + \beta$$
         if self.elementwise_affine:
