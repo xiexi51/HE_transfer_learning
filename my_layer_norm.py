@@ -140,17 +140,17 @@ class MyLayerNorm(Module):
         else:
             if self.training and not self.use_running_var_mean:
                 var_normed = var / var_mean
-                var_rescale = 1 / torch.sqrt(var_mean)
+                var_rescale = torch.sqrt(var_mean)
             else:
                 var_normed = var / self.running_var_mean
-                var_rescale = 1 / torch.sqrt(self.running_var_mean)
+                var_rescale = torch.sqrt(self.running_var_mean)
                 
             cheb_result = self.cheb.calculate(var_normed + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
             if self.training:
                 var_mask = var_normed > 3
                 cheb_result[var_mask] = 1.0 / torch.sqrt(var_normed[var_mask] + self.eps)
 
-            x_norm = (x - mean) * cheb_result * var_rescale
+            x_norm = (x - mean) * cheb_result / var_rescale
 
         # Scale and shift $$\text{LN}(x) = \gamma \hat{X} + \beta$$
         if self.elementwise_affine:
