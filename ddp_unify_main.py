@@ -29,6 +29,7 @@ import sys
 import torchvision
 from demonet import DemoNet
 from model_poly_avg import CustomSettings
+from my_layer_norm import MyLayerNorm
 
 def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
     lr = init_lr * (lr_gamma ** (epoch // lr_step_size))
@@ -338,6 +339,30 @@ def process(pn, args):
 
     recent_checkpoints = []
 
+    def print_counts(model, mode):
+        total_counts = None
+
+        # 遍历模型中的所有层
+        for layer in model.modules():
+            # 如果这一层是 MyLayerNorm 层
+            if isinstance(layer, MyLayerNorm):
+                # 根据 mode 的值来决定是打印 counts_train 还是 counts_test
+                counts = layer.counts_train if mode == 'train' else layer.counts_test
+
+                # 如果 total_counts 还未初始化，那么直接将 counts 赋值给 total_counts
+                if total_counts is None:
+                    total_counts = counts
+                else:
+                    # 否则，将 counts 加到 total_counts 上
+                    total_counts += counts
+
+        # 计算各区间的比例，并保留2位小数
+        total_counts = total_counts / total_counts.sum()
+        total_counts = np.round(total_counts, 2)
+
+        # 在一行内打印结果
+        print(" ".join(map(str, total_counts)))
+
     for epoch in range(start_epoch, args.total_epochs):
         if args.lr_step_size > 0:
             adjust_learning_rate(optimizer, epoch, args.lr, args.lr_step_size, args.lr_gamma)
@@ -373,14 +398,17 @@ def process(pn, args):
                                       mask=mask, writer=writer, world_pn=world_pn, omit_fms=omit_fms, mixup_fn=mixup_fn, criterion_ce=criterion_ce, 
                                       max_norm=None, update_freq=args.update_freq, model_ema=None, act_learn=act_learn, threshold_end=threshold_end, undo_grad=undo_grad)
         
-        print('avg_l2_norm = ', avg_l2_norm)
+        # print('avg_l2_norm = ', avg_l2_norm)
+
+        print_counts(model.module, 'train')
 
         if True or mask_end < 0.01:
             if mask is not None:
                 test_acc = ddp_test(args, testloader, model, epoch, best_acc, mask_end, writer, world_pn, threshold_end)
             else:
                 test_acc = ddp_test(args, testloader, model, epoch, best_acc, None, writer, world_pn, threshold_end)
-
+        
+        print_counts(model.module, 'test')
         # break
 
         if pn == 0:
