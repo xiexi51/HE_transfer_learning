@@ -341,24 +341,17 @@ def process(pn, args):
 
     def print_counts(model, mode):
         total_counts = None
-
-        # 遍历模型中的所有层
         for layer in model.modules():
-            # 如果这一层是 MyLayerNorm 层
             if isinstance(layer, MyLayerNorm):
-                # 根据 mode 的值来决定是打印 counts_train 还是 counts_test
                 counts = layer.counts_train if mode == 'train' else layer.counts_test
-
-                # 如果 total_counts 还未初始化，那么直接将 counts 赋值给 total_counts
+                if counts is None:
+                    break
                 if total_counts is None:
                     total_counts = counts
                 else:
-                    # 否则，将 counts 加到 total_counts 上
                     total_counts += counts
-
-
-        # 在一行内打印结果
-        print(" ".join(map(str, total_counts)))
+        if total_counts is not None:
+            print(" ".join(map(str, total_counts)))
 
     for epoch in range(start_epoch, args.total_epochs):
         if args.lr_step_size > 0:
@@ -371,6 +364,12 @@ def process(pn, args):
         threshold_begin, threshold_end = threshold
         if threshold_end < args.threshold_min:
             threshold_end = args.threshold_min
+
+        if args.running_var_mean_epoch >= 0 and epoch == args.running_var_mean_epoch:
+            for name, module in model.module.named_modules():
+                if isinstance(module, MyLayerNorm):
+                    module.use_running_var_mean = True
+        
 
         act_learn = 0
 
@@ -509,6 +508,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--cheb_params', nargs=3, type=float, default=[4, 0.1, 5], help='degree, a, b')
     parser.add_argument('--training_use_cheb', type=ast.literal_eval, default=False)
+    parser.add_argument('--running_var_mean_epoch', type=int, default=3)
 
     parser.add_argument('--only_test', type=ast.literal_eval, default=False)
 

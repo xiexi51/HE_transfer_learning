@@ -57,6 +57,7 @@ class MyLayerNorm(Module):
         self.cheb_params = [4, 0.1, 5]
         self.training_use_cheb = False
         self.cheb = MyCheb()
+        self.use_running_var_mean = False
 
         # Convert `normalized_shape` to `torch.Size`
         if isinstance(normalized_shape, int):
@@ -106,20 +107,26 @@ class MyLayerNorm(Module):
         
         var_mean = var.mean()
 
-        var_normed = var / var_mean
-        bins = [-np.inf, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, np.inf]
-        counts, _ = np.histogram(var_normed.detach().cpu().numpy(), bins=bins)
+        with torch.no_grad():
+            if self.training:
+                self.running_var_mean.data = exponential_average_factor * var_mean + (1 - exponential_average_factor) * self.running_var_mean
 
-        if self.training:
-            if self.counts_train is None:
-                self.counts_train = counts
-            else:
-                self.counts_train += counts
-        else:
-            if self.counts_test is None:
-                self.counts_test = counts
-            else:
-                self.counts_test += counts
+            if not self.training or self.use_running_var_mean:
+                var_normed = var / self.running_var_mean
+                
+                bins = [-np.inf, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, np.inf]
+                counts, _ = np.histogram(var_normed.detach().cpu().numpy(), bins=bins)
+
+                if self.training:
+                    if self.counts_train is None:
+                        self.counts_train = counts
+                    else:
+                        self.counts_train += counts
+                else:
+                    if self.counts_test is None:
+                        self.counts_test = counts
+                    else:
+                        self.counts_test += counts
 
         # if self.training:
         #     if len(self.train_var_list) < 1000:
@@ -129,16 +136,21 @@ class MyLayerNorm(Module):
         #         self.test_var_list.append(var + self.eps)
 
         if self.training and not self.training_use_cheb:
-            # with torch.no_grad():
-            #     self.running_var_mean.data = exponential_average_factor * torch.mean(var) + (1 - exponential_average_factor) * self.running_var_mean
             x_norm = (x - mean) / torch.sqrt(var + self.eps)
         else:
+            if self.training and not self.use_running_var_mean:
+                var_normed = var / var_mean
+                var_rescale = 1 / torch.sqrt(var_mean)
+            else:
+                var_normed = var / self.running_var_mean
+                var_rescale = 1 / torch.sqrt(self.running_var_mean)
+                
             cheb_result = self.cheb.calculate(var_normed + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
             if self.training:
                 var_mask = var_normed > 3
                 cheb_result[var_mask] = 1.0 / torch.sqrt(var_normed[var_mask] + self.eps)
 
-            x_norm = (x - mean) * cheb_result / torch.sqrt(var_mean)
+            x_norm = (x - mean) * cheb_result * var_rescale
 
         # Scale and shift $$\text{LN}(x) = \gamma \hat{X} + \beta$$
         if self.elementwise_affine:
