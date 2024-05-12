@@ -58,6 +58,7 @@ class MyLayerNorm(Module):
         self.training_use_cheb = False
         self.cheb = MyCheb()
         self.use_running_var_mean = False
+        self.var_norm_boundary = 3
 
         # Convert `normalized_shape` to `torch.Size`
         if isinstance(normalized_shape, int):
@@ -147,7 +148,7 @@ class MyLayerNorm(Module):
                 
             cheb_result = self.cheb.calculate(var_normed + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
             if self.training:
-                var_mask = var_normed > 8
+                var_mask = var_normed > self.var_norm_boundary
                 cheb_result[var_mask] = 1.0 / torch.sqrt(var_normed[var_mask] + self.eps)
 
             x_norm = (x - mean) * cheb_result / var_rescale
