@@ -417,7 +417,7 @@ def process(pn, args):
         
         # print('avg_l2_norm = ', avg_l2_norm)
 
-        print_counts(model.module, 'train')
+        print_counts(model.module, 'train', epoch)
 
         if True or mask_end < 0.01:
             if mask is not None:
