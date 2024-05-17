@@ -355,7 +355,7 @@ def process(pn, args):
             sum_test_counts_ratio = sum_test_counts / sum_test_counts.sum()
             print("test: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_test_counts_ratio)))
 
-            with open("var.txt", "a") as f:
+            with open(f"{log_dir}/var.txt", "a") as f:
                 f.write(f"Epoch: {epoch}\n")
 
                 # Print train counts ratio
