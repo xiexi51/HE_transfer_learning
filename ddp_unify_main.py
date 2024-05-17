@@ -414,8 +414,7 @@ def process(pn, args):
                     for layer in model.modules():
                         if isinstance(layer, MyLayerNorm) and layer.counts_train is not None:
                             counts_train_ratio = layer.counts_train / layer.counts_train.sum()
-                            f.write(f"Layer number: {layer.number}, Normalized shape: {layer.normalized_shape}\n")
-                            f.write(" ".join(map(lambda x: "{:.5f}".format(x), counts_train_ratio)) + "\n")
+                            f.write(f"{layer.number}: " + " ".join(map(lambda x: "{:.5f}".format(x), counts_train_ratio)) + "\n")
 
                     # Print test counts ratio
                     f.write("Test counts ratio:\n")
@@ -423,8 +422,7 @@ def process(pn, args):
                     for layer in model.modules():
                         if isinstance(layer, MyLayerNorm) and layer.counts_test is not None:
                             counts_test_ratio = layer.counts_test / layer.counts_test.sum()
-                            f.write(f"Layer number: {layer.number}, Normalized shape: {layer.normalized_shape}\n")
-                            f.write(" ".join(map(lambda x: "{:.5f}".format(x), counts_test_ratio)) + "\n")
+                            f.write(f"{layer.number}: " + " ".join(map(lambda x: "{:.5f}".format(x), counts_test_ratio)) + "\n")
 
         for layer in model.module.modules():
             if isinstance(layer, MyLayerNorm):
