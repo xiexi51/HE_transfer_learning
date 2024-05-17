@@ -338,6 +338,7 @@ def process(pn, args):
     torch.cuda.empty_cache()
 
     store_loss_var_factor = args.loss_var_factor
+    args.loss_var_factor = 0
 
     recent_checkpoints = []
 
@@ -358,8 +359,6 @@ def process(pn, args):
             for name, module in model.module.named_modules():
                 if isinstance(module, MyLayerNorm):
                     module.use_running_var_mean = True
-        else:
-            args.loss_var_factor = 0
 
         act_learn = 0
 
