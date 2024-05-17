@@ -339,27 +339,28 @@ def process(pn, args):
 
     recent_checkpoints = []
 
-    def print_counts(model, mode, epoch):
-        sum_counts = None
+    def print_counts(model, epoch):
+        sum_train_counts = None
+        sum_test_counts = None
         for layer in model.modules():
             if isinstance(layer, MyLayerNorm):
-                counts = layer.counts_train if mode == 'train' else layer.counts_test
-                if counts is None:
-                    break
-                if sum_counts is None:
-                    sum_counts = counts
-                else:
-                    sum_counts += counts
+                if layer.counts_train is not None:
+                    sum_train_counts = layer.counts_train if sum_train_counts is None else sum_train_counts + layer.counts_train
+                if layer.counts_test is not None:
+                    sum_test_counts = layer.counts_test if sum_test_counts is None else sum_test_counts + layer.counts_test
                 
-        if sum_counts is not None:
-            sum_counts_ratio = sum_counts / sum_counts.sum()
-            print(" ".join(map(lambda x: "{:.5f}".format(x), sum_counts_ratio)))
+        if sum_train_counts is not None:
+            sum_train_counts_ratio = sum_train_counts / sum_train_counts.sum()
+            print("train: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_train_counts_ratio)))
+            sum_test_counts_ratio = sum_test_counts / sum_test_counts.sum()
+            print("test: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_test_counts_ratio)))
 
             with open("var.txt", "a") as f:
                 f.write(f"Epoch: {epoch}\n")
 
                 # Print train counts ratio
                 f.write("Train counts ratio:\n")
+                f.write("Sum: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_train_counts_ratio)) + "\n")
                 for layer in model.modules():
                     if isinstance(layer, MyLayerNorm) and layer.counts_train is not None:
                         counts_train_ratio = layer.counts_train / layer.counts_train.sum()
@@ -368,6 +369,7 @@ def process(pn, args):
 
                 # Print test counts ratio
                 f.write("Test counts ratio:\n")
+                f.write("Sum: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_test_counts_ratio)) + "\n")
                 for layer in model.modules():
                     if isinstance(layer, MyLayerNorm) and layer.counts_test is not None:
                         counts_test_ratio = layer.counts_test / layer.counts_test.sum()
@@ -417,7 +419,7 @@ def process(pn, args):
         
         # print('avg_l2_norm = ', avg_l2_norm)
 
-        print_counts(model.module, 'train', epoch)
+        
 
         if True or mask_end < 0.01:
             if mask is not None:
@@ -425,7 +427,7 @@ def process(pn, args):
             else:
                 test_acc = ddp_test(args, testloader, model, epoch, best_acc, None, writer, world_pn, threshold_end)
         
-        print_counts(model.module, 'test')
+        print_counts(model.module, epoch)
 
         for layer in model.module.modules():
             if isinstance(layer, MyLayerNorm):
