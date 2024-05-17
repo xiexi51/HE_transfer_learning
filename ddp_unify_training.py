@@ -37,6 +37,7 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
     train_loss_ce = 0
     train_loss_fm = 0
     train_loss_conv = 0
+    train_loss_var = 0
 
     total_l2_norm = 0.0
     param_count = 0
@@ -128,6 +129,13 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
             else:
                 out_s = model_s(x)
 
+            loss_var = 0
+            for name, module in model_s.module.named_modules():
+                if isinstance(module, MyLayerNorm):
+                    saved_var_mean = module.saved_var.mean()
+                    loss_var += saved_var_mean
+                    
+
             # if iter == 100:
             #     for name, module in model_s.module.named_modules():
             #         if isinstance(module, MyLayerNorm):
@@ -148,6 +156,11 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
             #     break
            
             loss = 0
+
+            if args.loss_var_factor > 0:
+                loss_var = loss_var * args.loss_var_factor
+                loss += loss_var
+                train_loss_var += loss_var.item()
 
             if args.v_type != "demo":
                 total_conv, active_conv = model_s.module.get_conv_density()
@@ -221,7 +234,7 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
             accumulated_batches = 0 
         
         if args.pbar and world_pn == 0:
-            pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e},conv{active_conv_rate:.3f} 1a {100*iter_train_acc:.1f}, m{mask_current:.4f}, {undo_grad_signal}")
+            pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e},conv{active_conv_rate:.3f},var{train_loss_var/total:.2e} 1a {100*iter_train_acc:.1f}")
 
     # print(mask_current, mask[1])
 

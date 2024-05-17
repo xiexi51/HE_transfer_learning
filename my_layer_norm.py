@@ -84,6 +84,11 @@ class MyLayerNorm(Module):
         self.counts_train = None
         self.counts_test = None
 
+        self.total_counts_train = None
+        self.total_counts_test = None
+
+        self.saved_var = None
+
     def forward(self, x: torch.Tensor):
         exponential_average_factor = 0.0
 
@@ -105,6 +110,8 @@ class MyLayerNorm(Module):
         mean_x2 = (x ** 2).mean(dim=dims, keepdim=True)
         # Variance of all element $Var[X] = \mathbb{E}[X^2] - \mathbb{E}[X]^2$
         var = mean_x2 - mean ** 2
+
+        self.saved_var = var
         
         var_mean = var.mean()
 
@@ -115,7 +122,7 @@ class MyLayerNorm(Module):
             if not self.training or self.use_running_var_mean:
                 var_normed = var / self.running_var_mean
                 
-                bins = [-np.inf, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, np.inf]
+                bins = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, np.inf]
                 counts, _ = np.histogram(var_normed.detach().cpu().numpy(), bins=bins)
 
                 if self.training:
@@ -158,6 +165,19 @@ class MyLayerNorm(Module):
             x_norm = self.gain * x_norm + self.bias
 
         return x_norm
+    
+    def save_counts_to_total(self):
+        if self.total_counts_train is None:
+            self.total_counts_train = self.counts_train
+        else:
+            self.total_counts_train += self.counts_train
+        self.counts_train = None
+    
+        if self.total_counts_test is None:
+            self.total_counts_test = self.counts_test
+        else:
+            self.total_counts_test += self.counts_test
+        self.counts_test = None
     
 
 

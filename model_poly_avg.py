@@ -193,9 +193,11 @@ class ResNetAvgCustom(nn.Module):
         self.if_forward_with_fms = False
 
         self.num_layernorms = 0
-        for i, module in enumerate(self.modules()):
+        i = 0
+        for module in self.modules():
             if isinstance(module, MyLayerNorm):
                 module.number = i
+                i += 1
                 self.num_layernorms += 1
                 module.cheb_params = self.custom_settings.cheb_params
                 module.training_use_cheb = self.custom_settings.training_use_cheb

@@ -339,19 +339,40 @@ def process(pn, args):
 
     recent_checkpoints = []
 
-    def print_counts(model, mode):
-        total_counts = None
+    def print_counts(model, mode, epoch):
+        sum_counts = None
         for layer in model.modules():
             if isinstance(layer, MyLayerNorm):
                 counts = layer.counts_train if mode == 'train' else layer.counts_test
                 if counts is None:
                     break
-                if total_counts is None:
-                    total_counts = counts
+                if sum_counts is None:
+                    sum_counts = counts
                 else:
-                    total_counts += counts
-        if total_counts is not None:
-            print(" ".join(map(str, total_counts)))
+                    sum_counts += counts
+                
+        if sum_counts is not None:
+            sum_counts_ratio = sum_counts / sum_counts.sum()
+            print(" ".join(map(lambda x: "{:.5f}".format(x), sum_counts_ratio)))
+
+            with open("var.txt", "a") as f:
+                f.write(f"Epoch: {epoch}\n")
+
+                # Print train counts ratio
+                f.write("Train counts ratio:\n")
+                for layer in model.modules():
+                    if isinstance(layer, MyLayerNorm) and layer.counts_train is not None:
+                        counts_train_ratio = layer.counts_train / layer.counts_train.sum()
+                        f.write(f"Layer number: {layer.number}, Normalized shape: {layer.normalized_shape}\n")
+                        f.write(" ".join(map(lambda x: "{:.5f}".format(x), counts_train_ratio)) + "\n")
+
+                # Print test counts ratio
+                f.write("Test counts ratio:\n")
+                for layer in model.modules():
+                    if isinstance(layer, MyLayerNorm) and layer.counts_test is not None:
+                        counts_test_ratio = layer.counts_test / layer.counts_test.sum()
+                        f.write(f"Layer number: {layer.number}, Normalized shape: {layer.normalized_shape}\n")
+                        f.write(" ".join(map(lambda x: "{:.5f}".format(x), counts_test_ratio)) + "\n")
 
     for epoch in range(start_epoch, args.total_epochs):
         if args.lr_step_size > 0:
@@ -405,6 +426,11 @@ def process(pn, args):
                 test_acc = ddp_test(args, testloader, model, epoch, best_acc, None, writer, world_pn, threshold_end)
         
         print_counts(model.module, 'test')
+
+        for layer in model.module.modules():
+            if isinstance(layer, MyLayerNorm):
+                layer.save_counts_to_total()
+                
         # break
 
         if pn == 0:
@@ -459,6 +485,7 @@ def process(pn, args):
         if world_pn == 0 and args.copy_to_a6000:
             copy_to_a6000(os.path.join(log_dir, "acc.txt"), a6000_log_dir)
             copy_tensorboard_logs(log_dir, a6000_log_dir)
+            copy_to_a6000(os.path.join(log_dir, "var.txt"), a6000_log_dir)
             print(f"copied acc.txt and tensorboard event to a6000")
             if args.copy_model_every_epoch > 0 and (epoch + 1) % args.copy_model_every_epoch == 0:
                 copy_to_a6000(checkpoint_path, a6000_log_dir, silent=False)
@@ -605,6 +632,8 @@ if __name__ == "__main__":
     # parser.add_argument('--act_learn_mini_batch', type=ast.literal_eval, default=True)
 
     parser.add_argument('--loss_conv_prune_factor', default=0, type=float)
+    parser.add_argument('--loss_var_factor', default=0, type=float)
+
 
     parser.add_argument('--threshold', default=1, type=float)
     parser.add_argument('--threshold_decrease', default='linear', type=str, choices = ['0', '1', '1-sinx', 'e^(-x/10)', 'linear'])
