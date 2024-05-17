@@ -339,7 +339,7 @@ def process(pn, args):
 
     recent_checkpoints = []
 
-    def print_counts(model, epoch):
+    def print_counts(model, epoch, pn):
         sum_train_counts = None
         sum_test_counts = None
         for layer in model.modules():
@@ -355,26 +355,27 @@ def process(pn, args):
             sum_test_counts_ratio = sum_test_counts / sum_test_counts.sum()
             print("test: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_test_counts_ratio)))
 
-            with open(f"{log_dir}/var.txt", "a") as f:
-                f.write(f"Epoch: {epoch}\n")
+            if pn == 0:
+                with open(f"{log_dir}/var.txt", "a") as f:
+                    f.write(f"Epoch: {epoch}\n")
 
-                # Print train counts ratio
-                f.write("Train counts ratio:\n")
-                f.write("Sum: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_train_counts_ratio)) + "\n")
-                for layer in model.modules():
-                    if isinstance(layer, MyLayerNorm) and layer.counts_train is not None:
-                        counts_train_ratio = layer.counts_train / layer.counts_train.sum()
-                        f.write(f"Layer number: {layer.number}, Normalized shape: {layer.normalized_shape}\n")
-                        f.write(" ".join(map(lambda x: "{:.5f}".format(x), counts_train_ratio)) + "\n")
+                    # Print train counts ratio
+                    f.write("Train counts ratio:\n")
+                    f.write("Sum: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_train_counts_ratio)) + "\n")
+                    for layer in model.modules():
+                        if isinstance(layer, MyLayerNorm) and layer.counts_train is not None:
+                            counts_train_ratio = layer.counts_train / layer.counts_train.sum()
+                            f.write(f"Layer number: {layer.number}, Normalized shape: {layer.normalized_shape}\n")
+                            f.write(" ".join(map(lambda x: "{:.5f}".format(x), counts_train_ratio)) + "\n")
 
-                # Print test counts ratio
-                f.write("Test counts ratio:\n")
-                f.write("Sum: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_test_counts_ratio)) + "\n")
-                for layer in model.modules():
-                    if isinstance(layer, MyLayerNorm) and layer.counts_test is not None:
-                        counts_test_ratio = layer.counts_test / layer.counts_test.sum()
-                        f.write(f"Layer number: {layer.number}, Normalized shape: {layer.normalized_shape}\n")
-                        f.write(" ".join(map(lambda x: "{:.5f}".format(x), counts_test_ratio)) + "\n")
+                    # Print test counts ratio
+                    f.write("Test counts ratio:\n")
+                    f.write("Sum: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_test_counts_ratio)) + "\n")
+                    for layer in model.modules():
+                        if isinstance(layer, MyLayerNorm) and layer.counts_test is not None:
+                            counts_test_ratio = layer.counts_test / layer.counts_test.sum()
+                            f.write(f"Layer number: {layer.number}, Normalized shape: {layer.normalized_shape}\n")
+                            f.write(" ".join(map(lambda x: "{:.5f}".format(x), counts_test_ratio)) + "\n")
 
     for epoch in range(start_epoch, args.total_epochs):
         if args.lr_step_size > 0:
@@ -419,15 +420,13 @@ def process(pn, args):
         
         # print('avg_l2_norm = ', avg_l2_norm)
 
-        
-
         if True or mask_end < 0.01:
             if mask is not None:
                 test_acc = ddp_test(args, testloader, model, epoch, best_acc, mask_end, writer, world_pn, threshold_end)
             else:
                 test_acc = ddp_test(args, testloader, model, epoch, best_acc, None, writer, world_pn, threshold_end)
         
-        print_counts(model.module, epoch)
+        print_counts(model.module, epoch, pn)
 
         for layer in model.module.modules():
             if isinstance(layer, MyLayerNorm):
