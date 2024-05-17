@@ -361,7 +361,7 @@ def process(pn, args):
 
         # mask = 1
 
-        if pn == 0:
+        if pn == 0 and False:
             if mask is not None:
                 print("mask = ", mask)
                 writer.add_scalar('mask_end value', mask_end, epoch)
