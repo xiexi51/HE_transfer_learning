@@ -24,6 +24,9 @@ def slience_cmd(cmd, silent=True):
         print(f"Error: {e}")
 
 def copy_to_a6000(source, destination, silent=True):
+    if not os.path.exists(source):
+        print(f"Error: {source} does not exist")
+        return
     slience_cmd(f"scp {ssh_options} {source} {a6000_login}:{destination}", silent=silent)
 
 def copy_tensorboard_logs(log_dir, a6000_log_dir):
