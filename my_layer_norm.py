@@ -88,9 +88,11 @@ class MyLayerNorm(Module):
         self.total_counts_test = None
 
         self.epoch_train_var_mean = 0
+        self.epoch_train_var_sum = 0
         self.epoch_train_var_mean_count = 0
 
         self.epoch_test_var_mean = 0
+        self.epoch_test_var_sum = 0
         self.epoch_test_var_mean_count = 0
 
         self.saved_var = None
@@ -123,9 +125,11 @@ class MyLayerNorm(Module):
 
         if self.training:
             self.epoch_train_var_mean += var_mean.item()
+            self.epoch_train_var_sum += var.sum().item()
             self.epoch_train_var_mean_count += 1
         else:
             self.epoch_test_var_mean += var_mean.item()
+            self.epoch_test_var_sum += var.sum().item()
             self.epoch_test_var_mean_count += 1
 
         with torch.no_grad():
