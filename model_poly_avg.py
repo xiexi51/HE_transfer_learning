@@ -106,14 +106,14 @@ class BasicBlockAvgCustom(nn.Module):
     def __init__(self, in_planes, planes, stride, custom_settings, out_features):
         super().__init__()
         if custom_settings.norm_type == "my_layernorm":
-            self.norm1 = MyLayerNorm([planes, out_features, out_features])
-            self.norm2 = MyLayerNorm([planes, out_features, out_features])
+            self.norm1 = MyLayerNorm([out_features, out_features])
+            self.norm2 = MyLayerNorm([out_features, out_features])
         elif custom_settings.norm_type == "batchnorm":
             self.norm1 = nn.BatchNorm2d(planes)
             self.norm2 = nn.BatchNorm2d(planes)
         else:
-            self.norm1 = nn.LayerNorm([planes, out_features, out_features])
-            self.norm2 = nn.LayerNorm([planes, out_features, out_features])
+            self.norm1 = nn.LayerNorm([out_features, out_features])
+            self.norm2 = nn.LayerNorm([out_features, out_features])
             
         self.conv1 = Conv2dPruned(custom_settings, in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
         self.conv2 = Conv2dPruned(custom_settings, planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
@@ -121,11 +121,11 @@ class BasicBlockAvgCustom(nn.Module):
         self.shortcut = nn.Sequential()
         if stride != 1 or in_planes != self.expansion*planes:
             if custom_settings.norm_type == "my_layernorm":
-                self.shortcut_norm = MyLayerNorm([self.expansion*planes, out_features, out_features])
+                self.shortcut_norm = MyLayerNorm([out_features, out_features])
             elif custom_settings.norm_type == "batchnorm":
                 self.shortcut_norm = nn.BatchNorm2d(self.expansion*planes)
             else:
-                self.shortcut_norm = nn.LayerNorm([self.expansion*planes, out_features, out_features])
+                self.shortcut_norm = nn.LayerNorm([out_features, out_features])
             self.shortcut = nn.Sequential(
                 Conv2dPruned(custom_settings, in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
                 self.shortcut_norm
@@ -170,11 +170,11 @@ class ResNetAvgCustom(nn.Module):
         self.conv1 = Conv2dPruned(custom_settings, 3, 64, kernel_size=7, stride=2, padding=3, bias=False)
 
         if custom_settings.norm_type == "my_layernorm":
-            self.norm1 = MyLayerNorm([64, 112, 112])
+            self.norm1 = MyLayerNorm([112, 112])
         elif custom_settings.norm_type == "batchnorm":
             self.norm1 = nn.BatchNorm2d(64)
         else:
-            self.norm1 = nn.LayerNorm([64, 112, 112])
+            self.norm1 = nn.LayerNorm([112, 112])
 
         if not if_wide:
             self.layer1 = self._create_blocks(block, 64, num_blocks[0], stride=1, out_features=56)
