@@ -122,10 +122,10 @@ class MyLayerNorm(Module):
         var_mean = var.mean()
 
         if self.training:
-            self.epoch_train_var_mean += var_mean
+            self.epoch_train_var_mean += var_mean.item()
             self.epoch_train_var_mean_count += 1
         else:
-            self.epoch_test_var_mean += var_mean
+            self.epoch_test_var_mean += var_mean.item()
             self.epoch_test_var_mean_count += 1
 
         with torch.no_grad():

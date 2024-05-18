@@ -101,6 +101,9 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
     undo_grad_signal = "-"
 
     for iter, (x, y) in enumerate(pbar):
+        if iter >= 20 and not args.copy_to_a6000:
+            break
+
         if iter >= effective_batches:
             break
         if undo_grad:
@@ -269,6 +272,9 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, world_pn, t
         amp_dtype = torch.float16
 
     for iter, (x, y) in enumerate(pbar):
+        if iter >= 20 and not args.copy_to_a6000:
+            break
+
         x, y = x.cuda(), y.cuda()
         
         with torch.cuda.amp.autocast(enabled=args.use_amp, dtype=amp_dtype):

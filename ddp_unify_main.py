@@ -418,7 +418,7 @@ def process(pn, args):
                         if isinstance(layer, MyLayerNorm) and layer.counts_train is not None:
                             counts_train_ratio = layer.counts_train / layer.counts_train.sum()
                             epoch_train_var_mean = layer.epoch_train_var_mean / layer.epoch_train_var_mean_count
-                            f.write(f"{layer.number} {layer.normalized_shape} ev {epoch_train_var_mean:.2f} rv {layer.running_var_mean:.2f}: " + " ".join(map(lambda x: "{:.5f}".format(x), counts_train_ratio)) + "\n")
+                            f.write(f"{layer.number} {layer.normalized_shape} ev {epoch_train_var_mean:.2f} rv {layer.running_var_mean.item():.2f}: " + " ".join(map(lambda x: "{:.5f}".format(x), counts_train_ratio)) + "\n")
 
                     # Print test counts ratio
                     f.write("Test counts ratio:\n")
@@ -427,7 +427,7 @@ def process(pn, args):
                         if isinstance(layer, MyLayerNorm) and layer.counts_test is not None:
                             counts_test_ratio = layer.counts_test / layer.counts_test.sum()
                             epoch_test_var_mean = layer.epoch_test_var_mean / layer.epoch_test_var_mean_count
-                            f.write(f"{layer.number} {layer.normalized_shape} ev {epoch_test_var_mean:.2f} rv {layer.running_var_mean:.2f}: " + " ".join(map(lambda x: "{:.5f}".format(x), counts_test_ratio)) + "\n")
+                            f.write(f"{layer.number} {layer.normalized_shape} ev {epoch_test_var_mean:.2f} rv {layer.running_var_mean.item():.2f}: " + " ".join(map(lambda x: "{:.5f}".format(x), counts_test_ratio)) + "\n")
 
         for layer in model.module.modules():
             if isinstance(layer, MyLayerNorm):
