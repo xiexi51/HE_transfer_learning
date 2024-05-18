@@ -103,6 +103,8 @@ class MyLayerNorm(Module):
         if self.training:
             self.num_batches_tracked.data += 1
             exponential_average_factor = 1.0 / float(self.num_batches_tracked)
+            if exponential_average_factor < 0.01:
+                exponential_average_factor = 0.01
 
         # Sanity check to make sure the shapes match
         assert self.normalized_shape == x.shape[-len(self.normalized_shape):]
