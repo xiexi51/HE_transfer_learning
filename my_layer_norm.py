@@ -87,6 +87,12 @@ class MyLayerNorm(Module):
         self.total_counts_train = None
         self.total_counts_test = None
 
+        self.epoch_train_var_mean = 0
+        self.epoch_train_var_mean_count = 0
+
+        self.epoch_test_var_mean = 0
+        self.epoch_test_var_mean_count = 0
+
         self.saved_var = None
 
     def forward(self, x: torch.Tensor):
@@ -114,6 +120,13 @@ class MyLayerNorm(Module):
         self.saved_var = var
         
         var_mean = var.mean()
+
+        if self.training:
+            self.epoch_train_var_mean += var_mean
+            self.epoch_train_var_mean_count += 1
+        else:
+            self.epoch_test_var_mean += var_mean
+            self.epoch_test_var_mean_count += 1
 
         with torch.no_grad():
             if self.training:
