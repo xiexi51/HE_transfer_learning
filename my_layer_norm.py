@@ -49,6 +49,9 @@ class MyCheb():
                     c1 = tmp + c1*x2
         return c0 + c1*x
 
+def fix_quad(x):
+    return 0.1 * (x-6)**2 + 0.2
+
 class MyLayerNorm(Module):
     def __init__(self, normalized_shape: Union[int, List[int], Size], *, eps: float = 1e-5, elementwise_affine: bool = True):
         super().__init__()
@@ -174,7 +177,9 @@ class MyLayerNorm(Module):
                 var_normed = var / self.running_var_mean
                 var_rescale = torch.sqrt(self.running_var_mean)
                 
-            cheb_result = self.cheb.calculate(var_normed + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
+            # cheb_result = self.cheb.calculate(var_normed + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
+            cheb_result = fix_quad(var_normed)
+            
             if self.training:
                 var_mask = var_normed > self.var_norm_boundary
                 cheb_result[var_mask] = 1.0 / torch.sqrt(var_normed[var_mask] + self.eps)
