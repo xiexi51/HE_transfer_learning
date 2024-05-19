@@ -6,7 +6,7 @@ from utils import STEFunction
 from my_layer_norm import MyLayerNorm
 
 class CustomSettings:
-    def __init__(self, relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, norm_type, cheb_params, training_use_cheb, var_norm_boundary):
+    def __init__(self, relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, norm_type, cheb_params, training_use_cheb, var_norm_boundary, ln_momentum):
         self.relu_type = relu_type
         self.poly_weight_inits = poly_weight_inits
         self.poly_factors = poly_factors
@@ -16,6 +16,7 @@ class CustomSettings:
         self.cheb_params = cheb_params
         self.training_use_cheb = training_use_cheb
         self.var_norm_boundary = var_norm_boundary
+        self.ln_momentum = ln_momentum
     
 class custom_relu(nn.Module):
     def __init__(self, custom_settings, num_channels):
@@ -106,14 +107,14 @@ class BasicBlockAvgCustom(nn.Module):
     def __init__(self, in_planes, planes, stride, custom_settings, out_features):
         super().__init__()
         if custom_settings.norm_type == "my_layernorm":
-            self.norm1 = MyLayerNorm([out_features, out_features])
-            self.norm2 = MyLayerNorm([out_features, out_features])
+            self.norm1 = MyLayerNorm([planes, out_features, out_features])
+            self.norm2 = MyLayerNorm([planes, out_features, out_features])
         elif custom_settings.norm_type == "batchnorm":
             self.norm1 = nn.BatchNorm2d(planes)
             self.norm2 = nn.BatchNorm2d(planes)
         else:
-            self.norm1 = nn.LayerNorm([out_features, out_features])
-            self.norm2 = nn.LayerNorm([out_features, out_features])
+            self.norm1 = nn.LayerNorm([planes, out_features, out_features])
+            self.norm2 = nn.LayerNorm([planes, out_features, out_features])
             
         self.conv1 = Conv2dPruned(custom_settings, in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
         self.conv2 = Conv2dPruned(custom_settings, planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
@@ -121,11 +122,11 @@ class BasicBlockAvgCustom(nn.Module):
         self.shortcut = nn.Sequential()
         if stride != 1 or in_planes != self.expansion*planes:
             if custom_settings.norm_type == "my_layernorm":
-                self.shortcut_norm = MyLayerNorm([out_features, out_features])
+                self.shortcut_norm = MyLayerNorm([self.expansion*planes, out_features, out_features])
             elif custom_settings.norm_type == "batchnorm":
                 self.shortcut_norm = nn.BatchNorm2d(self.expansion*planes)
             else:
-                self.shortcut_norm = nn.LayerNorm([out_features, out_features])
+                self.shortcut_norm = nn.LayerNorm([self.expansion*planes, out_features, out_features])
             self.shortcut = nn.Sequential(
                 Conv2dPruned(custom_settings, in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
                 self.shortcut_norm
@@ -170,11 +171,11 @@ class ResNetAvgCustom(nn.Module):
         self.conv1 = Conv2dPruned(custom_settings, 3, 64, kernel_size=7, stride=2, padding=3, bias=False)
 
         if custom_settings.norm_type == "my_layernorm":
-            self.norm1 = MyLayerNorm([112, 112])
+            self.norm1 = MyLayerNorm([64, 112, 112])
         elif custom_settings.norm_type == "batchnorm":
             self.norm1 = nn.BatchNorm2d(64)
         else:
-            self.norm1 = nn.LayerNorm([112, 112])
+            self.norm1 = nn.LayerNorm([64, 112, 112])
 
         if not if_wide:
             self.layer1 = self._create_blocks(block, 64, num_blocks[0], stride=1, out_features=56)
@@ -202,6 +203,7 @@ class ResNetAvgCustom(nn.Module):
                 module.cheb_params = self.custom_settings.cheb_params
                 module.training_use_cheb = self.custom_settings.training_use_cheb
                 module.var_norm_boundary = self.custom_settings.var_norm_boundary
+                module.ln_momentum = self.custom_settings.ln_momentum
 
     def _create_blocks(self, block, planes, num_blocks, stride, out_features):
         strides = [stride] + [1]*(num_blocks-1)
@@ -261,6 +263,42 @@ class ResNetAvgCustom(nn.Module):
                     total += _total
                     active += _active
         return total, active
+    
+    def get_ln_statistics(self, epoch, log_file):
+        sum_train_counts = None
+        sum_test_counts = None
+        for layer in self.modules():
+            if isinstance(layer, MyLayerNorm):
+                if layer.counts_train is not None:
+                    sum_train_counts = layer.counts_train if sum_train_counts is None else sum_train_counts + layer.counts_train
+                if layer.counts_test is not None:
+                    sum_test_counts = layer.counts_test if sum_test_counts is None else sum_test_counts + layer.counts_test
+                
+        if sum_train_counts is not None:
+            sum_train_counts_ratio = sum_train_counts / sum_train_counts.sum()
+            print("train: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_train_counts_ratio)))
+            with open(log_file, "a") as f:
+                f.write(f"Epoch: {epoch}, Train counts ratio:\n")
+                f.write("Sum: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_train_counts_ratio)) + "\n")
+                for layer in self.modules():
+                    if isinstance(layer, MyLayerNorm) and layer.counts_train is not None:
+                        counts_train_ratio = layer.counts_train / layer.counts_train.sum()
+                        epoch_train_var_mean = layer.epoch_train_var_mean / layer.epoch_train_var_mean_count
+                        epoch_train_var_sum = layer.epoch_train_var_sum / layer.epoch_train_var_mean_count
+                        f.write(f"{layer.number} {layer.normalized_shape} ev {epoch_train_var_mean:.2f} evs {epoch_train_var_sum:.2f} rv {layer.running_var_mean.item():.2f}: " + " ".join(map(lambda x: "{:.5f}".format(x), counts_train_ratio)) + "\n")
+
+        if sum_test_counts is not None:
+            sum_test_counts_ratio = sum_test_counts / sum_test_counts.sum()
+            print("test: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_test_counts_ratio)))
+            with open(log_file, "a") as f:
+                f.write("Epoch: {epoch}, Test counts ratio:\n")
+                f.write("Sum: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_test_counts_ratio)) + "\n")
+                for layer in self.modules():
+                    if isinstance(layer, MyLayerNorm) and layer.counts_test is not None:
+                        counts_test_ratio = layer.counts_test / layer.counts_test.sum()
+                        epoch_test_var_mean = layer.epoch_test_var_mean / layer.epoch_test_var_mean_count
+                        epoch_test_var_sum = layer.epoch_test_var_sum / layer.epoch_test_var_mean_count
+                        f.write(f"{layer.number} {layer.normalized_shape} ev {epoch_test_var_mean:.2f} evs {epoch_test_var_sum:.2f} rv {layer.running_var_mean.item():.2f}: " + " ".join(map(lambda x: "{:.5f}".format(x), counts_test_ratio)) + "\n")
         
 def ResNet18AvgCustom(custom_settings, if_wide):
     return ResNetAvgCustom(BasicBlockAvgCustom, [2, 2, 2, 2], 1000, custom_settings, if_wide)

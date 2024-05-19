@@ -70,7 +70,9 @@ def process(pn, args):
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=1000 )
         
-    model_custom_settings = CustomSettings(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, args.prune_1_1_kernel, args.norm_type, args.cheb_params, args.training_use_cheb, args.var_norm_boundary)
+    model_custom_settings = CustomSettings(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, 
+                                           args.prune_1_1_kernel, args.norm_type, args.cheb_params, args.training_use_cheb, 
+                                           args.var_norm_boundary, args.ln_momentum)
 
     print("v_type = ", args.v_type)
     if args.v_type in ["5", "6", "7"]:
@@ -87,7 +89,9 @@ def process(pn, args):
     else:
         model = DemoNet(depth=10, dim=224, mode="mul")
 
-    teacher_custom_settings = CustomSettings(args.teacher_act_relu_type, [0, 0, 0], [0, 0, 0], args.teacher_prune_type, args.teacher_prune_1_1_kernel, args.teacher_norm_type, args.cheb_params, args.training_use_cheb, args.var_norm_boundary)
+    teacher_custom_settings = CustomSettings(args.teacher_act_relu_type, [0, 0, 0], [0, 0, 0], args.teacher_prune_type, 
+                                             args.teacher_prune_1_1_kernel, args.teacher_norm_type, args.cheb_params, args.training_use_cheb, 
+                                             args.var_norm_boundary, args.ln_momentum)
 
     if args.teacher_file is not None:
         if args.v_type in ["5", "6", "7"]:
@@ -325,6 +329,9 @@ def process(pn, args):
             # ddp_test(args, testloader, model_t, _test_epoch, best_acc, -1, writer, pn)
             ddp_test(args, testloader, model, _test_epoch, best_acc, 0, writer, pn, 1)
 
+            if pn == 0:
+                model.module.get_ln_statistics(0, f"{log_dir}/var.txt")
+
         return
 
     # if pn == 0:
@@ -390,46 +397,9 @@ def process(pn, args):
                 test_acc = ddp_test(args, testloader, model, epoch, best_acc, mask_end, writer, world_pn, threshold_end)
             else:
                 test_acc = ddp_test(args, testloader, model, epoch, best_acc, None, writer, world_pn, threshold_end)
-
-
-        sum_train_counts = None
-        sum_test_counts = None
-        for layer in model.modules():
-            if isinstance(layer, MyLayerNorm):
-                if layer.counts_train is not None:
-                    sum_train_counts = layer.counts_train if sum_train_counts is None else sum_train_counts + layer.counts_train
-                if layer.counts_test is not None:
-                    sum_test_counts = layer.counts_test if sum_test_counts is None else sum_test_counts + layer.counts_test
-                
-        if sum_train_counts is not None:
-            sum_train_counts_ratio = sum_train_counts / sum_train_counts.sum()
-            print("train: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_train_counts_ratio)))
-            sum_test_counts_ratio = sum_test_counts / sum_test_counts.sum()
-            print("test: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_test_counts_ratio)))
-
-            if pn == 0:
-                with open(f"{log_dir}/var.txt", "a") as f:
-                    f.write(f"Epoch: {epoch}\n")
-
-                    # Print train counts ratio
-                    f.write("Train counts ratio:\n")
-                    f.write("Sum: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_train_counts_ratio)) + "\n")
-                    for layer in model.modules():
-                        if isinstance(layer, MyLayerNorm) and layer.counts_train is not None:
-                            counts_train_ratio = layer.counts_train / layer.counts_train.sum()
-                            epoch_train_var_mean = layer.epoch_train_var_mean / layer.epoch_train_var_mean_count
-                            epoch_train_var_sum = layer.epoch_train_var_sum / layer.epoch_train_var_mean_count
-                            f.write(f"{layer.number} {layer.normalized_shape} ev {epoch_train_var_mean:.2f} evs {epoch_train_var_sum:.2f} rv {layer.running_var_mean.item():.2f}: " + " ".join(map(lambda x: "{:.5f}".format(x), counts_train_ratio)) + "\n")
-
-                    # Print test counts ratio
-                    f.write("Test counts ratio:\n")
-                    f.write("Sum: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_test_counts_ratio)) + "\n")
-                    for layer in model.modules():
-                        if isinstance(layer, MyLayerNorm) and layer.counts_test is not None:
-                            counts_test_ratio = layer.counts_test / layer.counts_test.sum()
-                            epoch_test_var_mean = layer.epoch_test_var_mean / layer.epoch_test_var_mean_count
-                            epoch_test_var_sum = layer.epoch_test_var_sum / layer.epoch_test_var_mean_count
-                            f.write(f"{layer.number} {layer.normalized_shape} ev {epoch_test_var_mean:.2f} evs {epoch_test_var_sum:.2f} rv {layer.running_var_mean.item():.2f}: " + " ".join(map(lambda x: "{:.5f}".format(x), counts_test_ratio)) + "\n")
+        
+        if pn == 0:
+            model.module.get_ln_statistics(epoch, f"{log_dir}/var.txt")
 
         for layer in model.module.modules():
             if isinstance(layer, MyLayerNorm):
@@ -522,6 +492,7 @@ if __name__ == "__main__":
     parser.add_argument('--log_root', type=str)
 
     parser.add_argument('--copy_to_a6000', type=ast.literal_eval, default=True)
+    parser.add_argument('--iter_break', type=int, default=0)
 
     parser.add_argument("--master_ip", type=str, default="127.0.0.1")
     parser.add_argument("--master_port", type=int, default=6105)
@@ -547,6 +518,7 @@ if __name__ == "__main__":
     parser.add_argument('--training_use_cheb', type=ast.literal_eval, default=False)
     parser.add_argument('--running_var_mean_epoch', type=int, default=3)
     parser.add_argument('--var_norm_boundary', type=float, default=3)
+    parser.add_argument('--ln_momentum', type=float, default=None)
 
     parser.add_argument('--only_test', type=ast.literal_eval, default=False)
 

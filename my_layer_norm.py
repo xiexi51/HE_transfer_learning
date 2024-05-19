@@ -59,6 +59,7 @@ class MyLayerNorm(Module):
         self.cheb = MyCheb()
         self.use_running_var_mean = False
         self.var_norm_boundary = 3
+        self.momentum = None
 
         # Convert `normalized_shape` to `torch.Size`
         if isinstance(normalized_shape, int):
@@ -103,8 +104,9 @@ class MyLayerNorm(Module):
         if self.training:
             self.num_batches_tracked.data += 1
             exponential_average_factor = 1.0 / float(self.num_batches_tracked)
-            if exponential_average_factor < 1.0 / 2400:
-                exponential_average_factor = 1.0 / 2400
+            if self.momentum is not None:
+                if exponential_average_factor < self.momentum:
+                    exponential_average_factor = self.momentum
 
         # Sanity check to make sure the shapes match
         assert self.normalized_shape == x.shape[-len(self.normalized_shape):]

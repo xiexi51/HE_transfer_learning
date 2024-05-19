@@ -101,7 +101,7 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
     undo_grad_signal = "-"
 
     for iter, (x, y) in enumerate(pbar):
-        if iter >= 20 and not args.copy_to_a6000:
+        if args.iter_break > 0 and iter >= args.iter_break:
             break
 
         if iter >= effective_batches:
@@ -131,13 +131,7 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
                     out_s, featuremap_s = model_s(x)
             else:
                 out_s = model_s(x)
-
-            loss_var = 0
-            for name, module in model_s.module.named_modules():
-                if isinstance(module, MyLayerNorm):
-                    saved_var_mean = module.saved_var.mean()
-                    loss_var += saved_var_mean
-                    
+                            
 
             # if iter == 100:
             #     for name, module in model_s.module.named_modules():
@@ -161,6 +155,11 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
             loss = 0
 
             if args.loss_var_factor > 0:
+                loss_var = 0
+                for name, module in model_s.module.named_modules():
+                    if isinstance(module, MyLayerNorm):
+                        saved_var_mean = module.saved_var.mean()
+                        loss_var += saved_var_mean / module.running_var_mean
                 loss_var = loss_var * args.loss_var_factor
                 loss += loss_var
                 train_loss_var += loss_var.item()
@@ -272,7 +271,7 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, world_pn, t
         amp_dtype = torch.float16
 
     for iter, (x, y) in enumerate(pbar):
-        if iter >= 20 and not args.copy_to_a6000:
+        if args.iter_break > 0 and iter >= args.iter_break:
             break
 
         x, y = x.cuda(), y.cuda()
