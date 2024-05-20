@@ -211,7 +211,7 @@ class MyLayerNorm(Module):
                 var_mask = var_normed > self.var_norm_boundary
                 cheb_result[var_mask] = 1.0 / torch.sqrt(var_normed[var_mask] + self.eps)
 
-            x_norm = (x - mean) * cheb_result / var_rescale
+            x_norm = (x - mean) * cheb_result / (var_rescale * 0.35)
 
         # Scale and shift $$\text{LN}(x) = \gamma \hat{X} + \beta$$
         if self.elementwise_affine:
