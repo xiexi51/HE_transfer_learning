@@ -4,19 +4,7 @@ import torch.nn.functional as F
 from model import fix_relu_poly, general_relu_poly, star_relu
 from utils import STEFunction
 from my_layer_norm import MyLayerNorm
-
-class CustomSettings:
-    def __init__(self, relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, norm_type, cheb_params, training_use_cheb, var_norm_boundary, ln_momentum):
-        self.relu_type = relu_type
-        self.poly_weight_inits = poly_weight_inits
-        self.poly_factors = poly_factors
-        self.prune_type = prune_type
-        self.prune_1_1_kernel = prune_1_1_kernel
-        self.norm_type = norm_type
-        self.cheb_params = cheb_params
-        self.training_use_cheb = training_use_cheb
-        self.var_norm_boundary = var_norm_boundary
-        self.ln_momentum = ln_momentum
+from utils import CustomSettings
     
 class custom_relu(nn.Module):
     def __init__(self, custom_settings, num_channels):
@@ -200,10 +188,7 @@ class ResNetAvgCustom(nn.Module):
                 module.number = i
                 i += 1
                 self.num_layernorms += 1
-                module.cheb_params = self.custom_settings.cheb_params
-                module.training_use_cheb = self.custom_settings.training_use_cheb
-                module.var_norm_boundary = self.custom_settings.var_norm_boundary
-                module.ln_momentum = self.custom_settings.ln_momentum
+                module.setup(self.custom_settings)
 
     def _create_blocks(self, block, planes, num_blocks, stride, out_features):
         strides = [stride] + [1]*(num_blocks-1)
@@ -291,7 +276,7 @@ class ResNetAvgCustom(nn.Module):
             sum_test_counts_ratio = sum_test_counts / sum_test_counts.sum()
             print("test: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_test_counts_ratio)))
             with open(log_file, "a") as f:
-                f.write("Epoch: {epoch}, Test counts ratio:\n")
+                f.write(f"Epoch: {epoch}, Test counts ratio:\n")
                 f.write("Sum: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_test_counts_ratio)) + "\n")
                 for layer in self.modules():
                     if isinstance(layer, MyLayerNorm) and layer.counts_test is not None:

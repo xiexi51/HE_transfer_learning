@@ -4,6 +4,7 @@ from torch import nn, Size
 from torch.nn import Module
 from numpy.polynomial import Chebyshev
 import numpy as np
+from utils import CustomSettings
 
 class MyCheb():
     def __init__(self):
@@ -49,13 +50,11 @@ class MyCheb():
                     c1 = tmp + c1*x2
         return c0 + c1*x
 
-def fix_quad(x):
-    return 0.03 * (x-10)**2 + 0.2
 
 class MyLayerNorm(Module):
     def __init__(self, normalized_shape: Union[int, List[int], Size], *, eps: float = 1e-5, elementwise_affine: bool = True):
         super().__init__()
-
+        self.is_setup = False
         self.number = 0
         self.cheb_params = [4, 0.1, 5]
         self.training_use_cheb = False
@@ -63,6 +62,12 @@ class MyLayerNorm(Module):
         self.use_running_var_mean = False
         self.var_norm_boundary = 3
         self.momentum = None
+
+        self.use_quad = True
+        self.trainable_quad_finetune = True
+        self.quad_coeffs = [0.03, 10, 0.2]
+        self.quad_finetune_factors = [0.0001, 0.1, 0.001]
+        self.quad_finetune_param = None
 
         # Convert `normalized_shape` to `torch.Size`
         if isinstance(normalized_shape, int):
@@ -101,7 +106,24 @@ class MyLayerNorm(Module):
 
         self.saved_var = None
 
+    def setup(self, custom_settings: CustomSettings):
+        self.is_setup = True
+        self.cheb_params = custom_settings.cheb_params
+        self.training_use_cheb = custom_settings.training_use_cheb
+        self.var_norm_boundary = custom_settings.var_norm_boundary
+        self.ln_momentum = custom_settings.ln_momentum
+        self.use_quad = custom_settings.ln_use_quad
+        self.trainable_quad_finetune = custom_settings.ln_trainable_quad_finetune
+        self.quad_coeffs = custom_settings.ln_quad_coeffs
+        self.quad_finetune_factors = custom_settings.ln_quad_finetune_factors
+        if self.trainable_quad_finetune:
+            self.quad_finetune_param = nn.Parameter(torch.zeros(3), requires_grad=True)
+        else:
+            self.quad_finetune_param = nn.Parameter(torch.zeros(3), requires_grad=False)
+
     def forward(self, x: torch.Tensor):
+        assert self.is_setup, "MyLayerNorm needs to be explicitly setup before forward pass."
+
         exponential_average_factor = 0.0
 
         if self.training:
@@ -176,9 +198,14 @@ class MyLayerNorm(Module):
             else:
                 var_normed = var / self.running_var_mean
                 var_rescale = torch.sqrt(self.running_var_mean)
-                
-            # cheb_result = self.cheb.calculate(var_normed + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
-            cheb_result = fix_quad(var_normed)
+            
+            if self.use_quad:
+                _a = self.quad_coeffs[0] + self.quad_finetune_param[0] * self.quad_finetune_factors[0]
+                _b = self.quad_coeffs[1] + self.quad_finetune_param[1] * self.quad_finetune_factors[1]
+                _c = self.quad_coeffs[2] + self.quad_finetune_param[2] * self.quad_finetune_factors[2]
+                cheb_result = _a * (var_normed - _b)**2 + _c
+            else:
+                cheb_result = self.cheb.calculate(var_normed + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
 
             if self.training:
                 var_mask = var_normed > self.var_norm_boundary

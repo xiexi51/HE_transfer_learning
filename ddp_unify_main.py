@@ -28,7 +28,7 @@ import setproctitle
 import sys
 import torchvision
 from demonet import DemoNet
-from model_poly_avg import CustomSettings
+from utils import CustomSettings
 from my_layer_norm import MyLayerNorm
 
 def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
@@ -72,7 +72,8 @@ def process(pn, args):
         
     model_custom_settings = CustomSettings(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, 
                                            args.prune_1_1_kernel, args.norm_type, args.cheb_params, args.training_use_cheb, 
-                                           args.var_norm_boundary, args.ln_momentum)
+                                           args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_trainable_quad_finetune,
+                                           args.ln_quad_coeffs, args.ln_quad_finetune_factors)
 
     print("v_type = ", args.v_type)
     if args.v_type in ["5", "6", "7"]:
@@ -91,7 +92,8 @@ def process(pn, args):
 
     teacher_custom_settings = CustomSettings(args.teacher_act_relu_type, [0, 0, 0], [0, 0, 0], args.teacher_prune_type, 
                                              args.teacher_prune_1_1_kernel, args.teacher_norm_type, args.cheb_params, args.training_use_cheb, 
-                                             args.var_norm_boundary, args.ln_momentum)
+                                             args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_trainable_quad_finetune,
+                                             args.ln_quad_coeffs, args.ln_quad_finetune_factors)
 
     if args.teacher_file is not None:
         if args.v_type in ["5", "6", "7"]:
@@ -519,6 +521,10 @@ if __name__ == "__main__":
     parser.add_argument('--running_var_mean_epoch', type=int, default=3)
     parser.add_argument('--var_norm_boundary', type=float, default=3)
     parser.add_argument('--ln_momentum', type=float, default=None)
+    parser.add_argument('--ln_use_quad', type=ast.literal_eval, default=True)
+    parser.add_argument('--ln_trainable_quad_finetune', type=ast.literal_eval, default=False)
+    parser.add_argument('--ln_quad_coeffs', nargs=3, type=float, default=[0.03, 10, 0.2])
+    parser.add_argument('--ln_quad_finetune_factors', nargs=3, type=float, default=[0.0001, 0.1, 0.001])
 
     parser.add_argument('--only_test', type=ast.literal_eval, default=False)
 
