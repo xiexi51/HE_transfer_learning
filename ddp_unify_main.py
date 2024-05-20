@@ -525,6 +525,8 @@ if __name__ == "__main__":
     parser.add_argument('--ln_trainable_quad_finetune', type=ast.literal_eval, default=False)
     parser.add_argument('--ln_quad_coeffs', nargs=3, type=float, default=[0.03, 10, 0.2])
     parser.add_argument('--ln_quad_finetune_factors', nargs=3, type=float, default=[0.0001, 0.1, 0.001])
+    parser.add_argument('--loss_var1_factor', default=0, type=float)
+    parser.add_argument('--loss_var2_factor', default=0, type=float)
 
     parser.add_argument('--only_test', type=ast.literal_eval, default=False)
 
@@ -620,7 +622,7 @@ if __name__ == "__main__":
     # parser.add_argument('--act_learn_mini_batch', type=ast.literal_eval, default=True)
 
     parser.add_argument('--loss_conv_prune_factor', default=0, type=float)
-    parser.add_argument('--loss_var_factor', default=0, type=float)
+    
 
 
     parser.add_argument('--threshold', default=1, type=float)
