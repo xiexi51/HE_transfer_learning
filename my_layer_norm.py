@@ -63,6 +63,9 @@ class MyLayerNorm(Module):
         self.var_norm_boundary = 3
         self.momentum = None
 
+        self.norm_type = "my_layernorm"
+        self.origin_ln = None
+
         self.use_quad = True
         self.trainable_quad_finetune = True
         self.quad_coeffs = [0.03, 10, 0.2]
@@ -102,6 +105,9 @@ class MyLayerNorm(Module):
         self.training_use_cheb = custom_settings.training_use_cheb
         self.var_norm_boundary = custom_settings.var_norm_boundary
         self.ln_momentum = custom_settings.ln_momentum
+
+        self.norm_type = custom_settings.norm_type
+
         self.use_quad = custom_settings.ln_use_quad
         self.trainable_quad_finetune = custom_settings.ln_trainable_quad_finetune
         self.quad_coeffs = custom_settings.ln_quad_coeffs
@@ -117,9 +123,14 @@ class MyLayerNorm(Module):
         if self.normalized_shape is None:
             self.normalized_shape = x.size()[1:]
             # Create parameters for $\gamma$ and $\beta$ for gain and bias
-            if self.elementwise_affine:
+            if self.norm_type == "my_layernorm" and self.elementwise_affine:
                 self.gain = nn.Parameter(torch.ones(self.normalized_shape))
                 self.bias = nn.Parameter(torch.zeros(self.normalized_shape))
+
+        if self.norm_type == "layernorm":
+            if self.origin_ln is None:
+                self.origin_ln = nn.LayerNorm(self.normalized_shape, eps=self.eps, elementwise_affine=self.elementwise_affine)
+            return self.origin_ln(x)
 
         exponential_average_factor = 0.0
 
