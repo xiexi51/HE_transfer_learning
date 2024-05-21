@@ -32,13 +32,16 @@ class BasicBlock(nn.Module):
                           kernel_size=1, stride=stride, bias=False),
                 nn.BatchNorm2d(self.expansion*planes)
             )
-        self.relu = nn.ReLU(inplace=True)
+        self.relu1 = nn.ReLU()
+        self.relu2 = nn.ReLU()
     def forward(self, x):
-        out = self.bn1(self.conv1(x))
-        out = self.relu(out)
-        out = self.bn2(self.conv2(out))
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu1(out)
+        out = self.conv2(out)
+        out = self.bn2(out)
         out += self.downsample(x)
-        out = self.relu(out)
+        out = self.relu2(out)
         return out
 
 
@@ -63,15 +66,20 @@ class Bottleneck(nn.Module):
                           kernel_size=1, stride=stride, bias=False),
                 nn.BatchNorm2d(self.expansion*planes)
             )
-        self.relu = nn.ReLU(inplace=True)
+        self.relu1 = nn.ReLU()
+        self.relu2 = nn.ReLU()
+        self.relu3 = nn.ReLU()
     def forward(self, x):
-        out = self.bn1(self.conv1(x))
-        out = self.relu(out)
-        out = self.bn2(self.conv2(out))
-        out = self.relu(out)
-        out = self.bn3(self.conv3(out))
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu1(out)
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = self.relu2(out)
+        out = self.conv3(out)
+        out = self.bn3(out)
         out += self.downsample(x)
-        out = self.relu(out)
+        out = self.relu3(out)
         return out
 
 

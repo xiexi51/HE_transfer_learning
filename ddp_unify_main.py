@@ -96,10 +96,10 @@ def process(pn, args):
         else:
             model = ResNet50()
 
-        def replace_modules(model, model_custom_settings):
+        def replace_modules(model, model_custom_settings, i=0):
             for name, module in model.named_children():
-                if isinstance(module, torch.nn.Sequential):
-                    replace_modules(module, model_custom_settings)
+                if len(list(module.children())) > 0:
+                    i = replace_modules(module, model_custom_settings, i)
                 else:
                     if isinstance(module, torch.nn.MaxPool2d):
                         setattr(model, name, torch.nn.AvgPool2d(module.kernel_size, module.stride, module.padding))
@@ -107,8 +107,11 @@ def process(pn, args):
                         setattr(model, name, custom_relu(model_custom_settings))
                     if isinstance(module, torch.nn.BatchNorm2d):
                         my_layer_norm = MyLayerNorm()
+                        my_layer_norm.number = i
                         my_layer_norm.setup(model_custom_settings)
                         setattr(model, name, my_layer_norm)
+                        i += 1
+            return i
 
         replace_modules(model, model_custom_settings)
 

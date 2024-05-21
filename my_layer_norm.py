@@ -70,7 +70,7 @@ class MyLayerNorm(Module):
         self.quad_finetune_param = None
 
         self.num_batches_tracked = nn.Parameter(torch.zeros(1), requires_grad=False)
-        self.running_var_mean = nn.Parameter(torch.zeros(1), requires_grad=False)
+        self.running_var_mean = nn.Parameter(torch.ones(1), requires_grad=False)
 
         self.normalized_shape = None
         self.eps = eps
@@ -225,7 +225,29 @@ class MyLayerNorm(Module):
         else:
             self.total_counts_test += self.counts_test
         self.counts_test = None
-    
+
+
+def process_layer(layer, counts_type, f):
+    if isinstance(layer, MyLayerNorm):
+        layer_counts = getattr(layer, f"counts_{counts_type}", None)
+        if layer_counts is not None:
+            counts_ratio = layer_counts / layer_counts.sum()
+            epoch_var_mean = getattr(layer, f"epoch_{counts_type}_var_mean", 0) / getattr(layer, f"epoch_{counts_type}_var_mean_count", 1)
+            epoch_var_sum = getattr(layer, f"epoch_{counts_type}_var_sum", 0) / getattr(layer, f"epoch_{counts_type}_var_mean_count", 1)
+            f.write(f"{layer.number} {layer.normalized_shape} ev {epoch_var_mean:.2f} evs {epoch_var_sum:.2f} rv {layer.running_var_mean.item():.2f}: " + " ".join(map(lambda x: "{:.5f}".format(x), counts_ratio)) + "\n")
+    elif len(list(layer.children())) > 0:
+        for child in layer.children():
+            process_layer(child, counts_type, f)
+
+def process_counts(model, epoch, log_file, sum_counts, counts_type):
+    if sum_counts is not None:
+        sum_counts_ratio = sum_counts / sum_counts.sum()
+        print(f"{counts_type}: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_counts_ratio)))
+        with open(log_file, "a") as f:
+            f.write(f"Epoch: {epoch}, {counts_type.capitalize()} counts ratio:\n")
+            f.write("Sum: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_counts_ratio)) + "\n")
+            for layer in model.children():
+                process_layer(layer, counts_type, f)
 
 def get_ln_statistics(model, epoch, log_file):
     sum_train_counts = None
@@ -237,28 +259,5 @@ def get_ln_statistics(model, epoch, log_file):
             if layer.counts_test is not None:
                 sum_test_counts = layer.counts_test if sum_test_counts is None else sum_test_counts + layer.counts_test
                 
-    if sum_train_counts is not None:
-        sum_train_counts_ratio = sum_train_counts / sum_train_counts.sum()
-        print("train: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_train_counts_ratio)))
-        with open(log_file, "a") as f:
-            f.write(f"Epoch: {epoch}, Train counts ratio:\n")
-            f.write("Sum: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_train_counts_ratio)) + "\n")
-            for layer in model.modules():
-                if isinstance(layer, MyLayerNorm) and layer.counts_train is not None:
-                    counts_train_ratio = layer.counts_train / layer.counts_train.sum()
-                    epoch_train_var_mean = layer.epoch_train_var_mean / layer.epoch_train_var_mean_count
-                    epoch_train_var_sum = layer.epoch_train_var_sum / layer.epoch_train_var_mean_count
-                    f.write(f"{layer.number} {layer.normalized_shape} ev {epoch_train_var_mean:.2f} evs {epoch_train_var_sum:.2f} rv {layer.running_var_mean.item():.2f}: " + " ".join(map(lambda x: "{:.5f}".format(x), counts_train_ratio)) + "\n")
-
-    if sum_test_counts is not None:
-        sum_test_counts_ratio = sum_test_counts / sum_test_counts.sum()
-        print("test: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_test_counts_ratio)))
-        with open(log_file, "a") as f:
-            f.write(f"Epoch: {epoch}, Test counts ratio:\n")
-            f.write("Sum: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_test_counts_ratio)) + "\n")
-            for layer in model.modules():
-                if isinstance(layer, MyLayerNorm) and layer.counts_test is not None:
-                    counts_test_ratio = layer.counts_test / layer.counts_test.sum()
-                    epoch_test_var_mean = layer.epoch_test_var_mean / layer.epoch_test_var_mean_count
-                    epoch_test_var_sum = layer.epoch_test_var_sum / layer.epoch_test_var_mean_count
-                    f.write(f"{layer.number} {layer.normalized_shape} ev {epoch_test_var_mean:.2f} evs {epoch_test_var_sum:.2f} rv {layer.running_var_mean.item():.2f}: " + " ".join(map(lambda x: "{:.5f}".format(x), counts_test_ratio)) + "\n")
+    process_counts(model, epoch, log_file, sum_train_counts, "train")
+    process_counts(model, epoch, log_file, sum_test_counts, "test")
