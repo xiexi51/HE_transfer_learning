@@ -7,18 +7,24 @@ from my_layer_norm import MyLayerNorm
 from utils import CustomSettings
     
 class custom_relu(nn.Module):
-    def __init__(self, custom_settings, num_channels):
+    def __init__(self, custom_settings):
         super().__init__()
-        if custom_settings.relu_type == "channel":
-            self.relu = general_relu_poly(if_channel=True, if_pixel=True, weight_inits=custom_settings.poly_weight_inits, factors=custom_settings.poly_factors, num_channels=num_channels)
-        elif custom_settings.relu_type == "fix":
-            self.relu = fix_relu_poly(if_pixel=True, factors=custom_settings.poly_factors)
-        elif custom_settings.relu_type == "star":
-            self.relu = star_relu(num_channels)
-        else:
-            self.relu = nn.ReLU()
+        self.custom_settings = custom_settings
+        self.relu = None
     
-    def forward(self, x, mask):
+    def forward(self, x, mask=0):
+        if self.relu is None:
+            num_channels = x.shape[1]
+            if self.custom_settings.relu_type == "channel":
+                self.relu = general_relu_poly(if_channel=True, if_pixel=False, weight_inits=self.custom_settings.poly_weight_inits, 
+                                              factors=self.custom_settings.poly_factors, num_channels=num_channels)
+            elif self.custom_settings.relu_type == "fix":
+                self.relu = fix_relu_poly(if_pixel=False, factors=self.custom_settings.poly_factors)
+            elif self.custom_settings.relu_type == "star":
+                self.relu = star_relu(num_channels)
+            else:
+                self.relu = nn.ReLU()
+
         if isinstance(self.relu, nn.ReLU) or isinstance(self.relu, star_relu):
             x = self.relu(x)
         else:
@@ -95,8 +101,8 @@ class BasicBlockAvgCustom(nn.Module):
     def __init__(self, in_planes, planes, stride, custom_settings, out_features):
         super().__init__()
         if custom_settings.norm_type == "my_layernorm":
-            self.norm1 = MyLayerNorm([planes, out_features, out_features])
-            self.norm2 = MyLayerNorm([planes, out_features, out_features])
+            self.norm1 = MyLayerNorm()
+            self.norm2 = MyLayerNorm()
         elif custom_settings.norm_type == "batchnorm":
             self.norm1 = nn.BatchNorm2d(planes)
             self.norm2 = nn.BatchNorm2d(planes)
@@ -110,7 +116,7 @@ class BasicBlockAvgCustom(nn.Module):
         self.shortcut = nn.Sequential()
         if stride != 1 or in_planes != self.expansion*planes:
             if custom_settings.norm_type == "my_layernorm":
-                self.shortcut_norm = MyLayerNorm([self.expansion*planes, out_features, out_features])
+                self.shortcut_norm = MyLayerNorm()
             elif custom_settings.norm_type == "batchnorm":
                 self.shortcut_norm = nn.BatchNorm2d(self.expansion*planes)
             else:
@@ -120,8 +126,8 @@ class BasicBlockAvgCustom(nn.Module):
                 self.shortcut_norm
             )
 
-        self.relu1 = custom_relu(custom_settings, planes)
-        self.relu2 = custom_relu(custom_settings, planes)
+        self.relu1 = custom_relu(custom_settings)
+        self.relu2 = custom_relu(custom_settings)
 
     def forward(self, x, mask, threshold):
         fms = []
@@ -159,7 +165,7 @@ class ResNetAvgCustom(nn.Module):
         self.conv1 = Conv2dPruned(custom_settings, 3, 64, kernel_size=7, stride=2, padding=3, bias=False)
 
         if custom_settings.norm_type == "my_layernorm":
-            self.norm1 = MyLayerNorm([64, 112, 112])
+            self.norm1 = MyLayerNorm()
         elif custom_settings.norm_type == "batchnorm":
             self.norm1 = nn.BatchNorm2d(64)
         else:
@@ -178,7 +184,7 @@ class ResNetAvgCustom(nn.Module):
             self.layer4 = self._create_blocks(block, 1024, num_blocks[3], stride=2, out_features=7)
             self.linear = nn.Linear(1024*block.expansion, num_classes)
 
-        self.relu1 = custom_relu(custom_settings, 64)
+        self.relu1 = custom_relu(custom_settings)
         self.if_forward_with_fms = False
 
         self.num_layernorms = 0

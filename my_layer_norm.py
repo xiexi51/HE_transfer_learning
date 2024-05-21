@@ -52,7 +52,7 @@ class MyCheb():
 
 
 class MyLayerNorm(Module):
-    def __init__(self, normalized_shape: Union[int, List[int], Size], *, eps: float = 1e-5, elementwise_affine: bool = True):
+    def __init__(self, eps: float = 1e-5, elementwise_affine: bool = True):
         super().__init__()
         self.is_setup = False
         self.number = 0
@@ -69,23 +69,13 @@ class MyLayerNorm(Module):
         self.quad_finetune_factors = [0.0001, 0.1, 0.001]
         self.quad_finetune_param = None
 
-        # Convert `normalized_shape` to `torch.Size`
-        if isinstance(normalized_shape, int):
-            normalized_shape = torch.Size([normalized_shape])
-        elif isinstance(normalized_shape, list):
-            normalized_shape = torch.Size(normalized_shape)
-        assert isinstance(normalized_shape, torch.Size)
-
         self.num_batches_tracked = nn.Parameter(torch.zeros(1), requires_grad=False)
         self.running_var_mean = nn.Parameter(torch.zeros(1), requires_grad=False)
 
-        self.normalized_shape = normalized_shape
+        self.normalized_shape = None
         self.eps = eps
         self.elementwise_affine = elementwise_affine
-        # Create parameters for $\gamma$ and $\beta$ for gain and bias
-        if self.elementwise_affine:
-            self.gain = nn.Parameter(torch.ones(normalized_shape))
-            self.bias = nn.Parameter(torch.zeros(normalized_shape))
+        
 
         self.train_var_list = []
         self.test_var_list = []
@@ -124,6 +114,13 @@ class MyLayerNorm(Module):
     def forward(self, x: torch.Tensor):
         assert self.is_setup, "MyLayerNorm needs to be explicitly setup before forward pass."
 
+        if self.normalized_shape is None:
+            self.normalized_shape = x.size()[1:]
+            # Create parameters for $\gamma$ and $\beta$ for gain and bias
+            if self.elementwise_affine:
+                self.gain = nn.Parameter(torch.ones(self.normalized_shape))
+                self.bias = nn.Parameter(torch.zeros(self.normalized_shape))
+
         exponential_average_factor = 0.0
 
         if self.training:
@@ -132,9 +129,6 @@ class MyLayerNorm(Module):
             if self.momentum is not None:
                 if exponential_average_factor < self.momentum:
                     exponential_average_factor = self.momentum
-
-        # Sanity check to make sure the shapes match
-        assert self.normalized_shape == x.shape[-len(self.normalized_shape):]
 
         # The dimensions to calculate the mean and variance on
         dims = [-(i + 1) for i in range(len(self.normalized_shape))]

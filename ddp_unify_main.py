@@ -21,15 +21,16 @@ import torch.distributed as dist
 from utils_dataset import build_dataset
 from vanillanet_deploy_poly import VanillaNet_deploy_poly
 from vanillanet_full_unify import vanillanet_5_full_unify, vanillanet_6_full_unify, vanillanet_7_full_unify, VanillaNetFullUnify
-from model_poly_avg import ResNet18AvgCustom, ResNetAvgCustom, Conv2dPruned
+from model_poly_avg import ResNet18AvgCustom, ResNetAvgCustom, Conv2dPruned, custom_relu
 from model import initialize_resnet
 from locals import proj_root
 import setproctitle
 import sys
-import torchvision
+from torchvision import models
 from demonet import DemoNet
 from utils import CustomSettings
 from my_layer_norm import MyLayerNorm
+from resnet import ResNet34, ResNet18
 
 def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
     lr = init_lr * (lr_gamma ** (epoch // lr_step_size))
@@ -84,9 +85,32 @@ def process(pn, args):
         else:
             vanillanet = vanillanet_5_full_unify
         model = vanillanet(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, args.prune_1_1_kernel, args.old_version, args.vanilla_shortcut, args.vanilla_keep_bn)
-    elif args.v_type == "18":
-        model = ResNet18AvgCustom(model_custom_settings, args.if_wide)
-        initialize_resnet(model)
+    # elif args.v_type == "18":
+    #     model = ResNet18AvgCustom(model_custom_settings, args.if_wide)
+    #     initialize_resnet(model)
+    elif args.v_type == "34" or args.v_type == "18":
+        if args.v_type == "18":
+            model = ResNet18()
+        else:
+            model = ResNet34()
+        def replace_modules(model, model_custom_settings):
+            for name, module in model.named_children():
+                if isinstance(module, torch.nn.Sequential):
+                    replace_modules(module, model_custom_settings)
+                else:
+                    if isinstance(module, torch.nn.MaxPool2d):
+                        setattr(model, name, torch.nn.AvgPool2d(module.kernel_size, module.stride, module.padding))
+                    if isinstance(module, torch.nn.ReLU):
+                        setattr(model, name, custom_relu(model_custom_settings))
+                    if isinstance(module, torch.nn.BatchNorm2d):
+                        my_layer_norm = MyLayerNorm()
+                        my_layer_norm.setup(model_custom_settings)
+                        setattr(model, name, my_layer_norm)
+
+        replace_modules(model, model_custom_settings)
+
+        # model.load_state_dict(models.resnet34(weights=models.resnet.ResNet34_Weights.DEFAULT).state_dict(), strict=True)
+
     else:
         model = DemoNet(depth=10, dim=224, mode="mul")
 
@@ -114,10 +138,11 @@ def process(pn, args):
     else:
         model_t = None
     
-    # if args.v_type != "demo":
-    #     dummy_input = torch.rand(10, 3, 224, 224) 
-    #     model.eval()
-    #     model((dummy_input, 0, 1))
+    if args.v_type != "demo":
+        dummy_input = torch.rand(10, 3, 224, 224) 
+        model.eval()
+        # model((dummy_input, 0, 1))
+        model(dummy_input)
 
     checkpoint = None
 
@@ -197,10 +222,10 @@ def process(pn, args):
                 if not name.endswith("rand_mask"):
                     param.requires_grad = True
 
-    if args.v_type != "demo":
-        linear_features = model.linear.in_features
-        if args.dataset == "cifar10":
-            model.linear = torch.nn.Linear(linear_features, 10)
+    # if args.v_type != "demo":
+    #     linear_features = model.linear.in_features
+    #     if args.dataset == "cifar10":
+    #         model.linear = torch.nn.Linear(linear_features, 10)
 
     if args.loss_conv_prune_factor == 0:
         for name, module in model.named_modules():
@@ -213,7 +238,7 @@ def process(pn, args):
     if model_t is not None:
         model_t = model_t.cuda()
 
-    model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+    # model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = DistributedDataParallel(model, device_ids=[pn])
 
     relu_weights = []
@@ -315,7 +340,7 @@ def process(pn, args):
         max_accuracy_ema_epoch = 0
         best_ema_decay = args.model_ema_decay[0]
 
-    if args.only_test and (args.reload or args.resume):
+    if False or (args.only_test and (args.reload or args.resume)):
         if start_epoch == 0:
             _test_epoch = 0
         else:
@@ -331,8 +356,8 @@ def process(pn, args):
             # ddp_test(args, testloader, model_t, _test_epoch, best_acc, -1, writer, pn)
             ddp_test(args, testloader, model, _test_epoch, best_acc, 0, writer, pn, 1)
 
-            if pn == 0:
-                model.module.get_ln_statistics(0, f"{log_dir}/var.txt")
+            # if pn == 0:
+            #     model.module.get_ln_statistics(0, f"{log_dir}/var.txt")
 
         return
 
@@ -346,8 +371,10 @@ def process(pn, args):
 
     torch.cuda.empty_cache()
 
-    store_loss_var_factor = args.loss_var_factor
-    args.loss_var_factor = 0
+    store_loss_var1_factor = args.loss_var1_factor
+    store_loss_var2_factor = args.loss_var2_factor
+    args.loss_var1_factor = 0
+    args.loss_var2_factor = 0
 
     recent_checkpoints = []
 
@@ -364,7 +391,8 @@ def process(pn, args):
             threshold_end = args.threshold_min
 
         if args.running_var_mean_epoch >= 0 and epoch == args.running_var_mean_epoch:
-            args.loss_var_factor = store_loss_var_factor
+            args.loss_var1_factor = store_loss_var1_factor
+            args.loss_var2_factor = store_loss_var2_factor
             for name, module in model.module.named_modules():
                 if isinstance(module, MyLayerNorm):
                     module.use_running_var_mean = True
@@ -400,8 +428,8 @@ def process(pn, args):
             else:
                 test_acc = ddp_test(args, testloader, model, epoch, best_acc, None, writer, world_pn, threshold_end)
         
-        if pn == 0:
-            model.module.get_ln_statistics(epoch, f"{log_dir}/var.txt")
+        # if pn == 0:
+        #     model.module.get_ln_statistics(epoch, f"{log_dir}/var.txt")
 
         for layer in model.module.modules():
             if isinstance(layer, MyLayerNorm):
@@ -416,7 +444,7 @@ def process(pn, args):
         # break
 
         if pn == 0:
-            if args.v_type != "demo":
+            if args.v_type != "demo" and args.v_type != "34" and args.v_type != "18":
                 total, active = model.module.get_conv_density()
                 active_conv_rate = active / total
             else:
@@ -513,7 +541,7 @@ if __name__ == "__main__":
     parser.add_argument('--act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix', 'star'])
     parser.add_argument('--teacher_act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix', 'star'])
 
-    parser.add_argument('--v_type', type=str, default="18", choices = ["5", "6", "7", "18", "demo"])
+    parser.add_argument('--v_type', type=str, default="18", choices = ["5", "6", "7", "18", "34", "demo"])
     parser.add_argument('--old_version', type=ast.literal_eval, default=False)
 
     parser.add_argument('--cheb_params', nargs=3, type=float, default=[4, 0.1, 5], help='degree, a, b')
@@ -606,7 +634,7 @@ if __name__ == "__main__":
     parser.add_argument('--model_ema_eval', type=ast.literal_eval, default=False, help='Using ema to eval during training.')
 
     parser.add_argument('--train_subset', type=ast.literal_eval, default=False, help='if train on the 1/13 subset of ImageNet or the full ImageNet')
-    parser.add_argument('--pixel_wise', type=ast.literal_eval, default=True, help='if use pixel-wise poly replacement')
+    parser.add_argument('--pixel_wise', type=ast.literal_eval, default=False, help='if use pixel-wise poly replacement')
     parser.add_argument('--channel_wise', type=ast.literal_eval, default=True, help='if use channel-wise relu_poly class')
     parser.add_argument('--poly_weight_inits', nargs=3, type=float, default=[0, 1, 0], help='relu_poly weights initial values')
     parser.add_argument('--poly_weight_factors', nargs=3, type=float, default=[0.1, 1, 1], help='adjust the learning rate of the three weights in relu_poly')
