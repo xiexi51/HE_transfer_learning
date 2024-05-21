@@ -105,7 +105,7 @@ def process(pn, args):
                         setattr(model, name, torch.nn.AvgPool2d(module.kernel_size, module.stride, module.padding))
                     if isinstance(module, torch.nn.ReLU):
                         setattr(model, name, custom_relu(model_custom_settings))
-                    if isinstance(module, torch.nn.BatchNorm2d):
+                    if isinstance(module, torch.nn.BatchNorm2d) and args.norm_type == "my_layernorm":
                         my_layer_norm = MyLayerNorm()
                         my_layer_norm.number = i
                         my_layer_norm.setup(model_custom_settings)
