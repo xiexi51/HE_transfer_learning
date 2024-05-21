@@ -227,4 +227,38 @@ class MyLayerNorm(Module):
         self.counts_test = None
     
 
+def get_ln_statistics(model, epoch, log_file):
+    sum_train_counts = None
+    sum_test_counts = None
+    for layer in model.modules():
+        if isinstance(layer, MyLayerNorm):
+            if layer.counts_train is not None:
+                sum_train_counts = layer.counts_train if sum_train_counts is None else sum_train_counts + layer.counts_train
+            if layer.counts_test is not None:
+                sum_test_counts = layer.counts_test if sum_test_counts is None else sum_test_counts + layer.counts_test
+                
+    if sum_train_counts is not None:
+        sum_train_counts_ratio = sum_train_counts / sum_train_counts.sum()
+        print("train: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_train_counts_ratio)))
+        with open(log_file, "a") as f:
+            f.write(f"Epoch: {epoch}, Train counts ratio:\n")
+            f.write("Sum: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_train_counts_ratio)) + "\n")
+            for layer in model.modules():
+                if isinstance(layer, MyLayerNorm) and layer.counts_train is not None:
+                    counts_train_ratio = layer.counts_train / layer.counts_train.sum()
+                    epoch_train_var_mean = layer.epoch_train_var_mean / layer.epoch_train_var_mean_count
+                    epoch_train_var_sum = layer.epoch_train_var_sum / layer.epoch_train_var_mean_count
+                    f.write(f"{layer.number} {layer.normalized_shape} ev {epoch_train_var_mean:.2f} evs {epoch_train_var_sum:.2f} rv {layer.running_var_mean.item():.2f}: " + " ".join(map(lambda x: "{:.5f}".format(x), counts_train_ratio)) + "\n")
 
+    if sum_test_counts is not None:
+        sum_test_counts_ratio = sum_test_counts / sum_test_counts.sum()
+        print("test: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_test_counts_ratio)))
+        with open(log_file, "a") as f:
+            f.write(f"Epoch: {epoch}, Test counts ratio:\n")
+            f.write("Sum: " + " ".join(map(lambda x: "{:.5f}".format(x), sum_test_counts_ratio)) + "\n")
+            for layer in model.modules():
+                if isinstance(layer, MyLayerNorm) and layer.counts_test is not None:
+                    counts_test_ratio = layer.counts_test / layer.counts_test.sum()
+                    epoch_test_var_mean = layer.epoch_test_var_mean / layer.epoch_test_var_mean_count
+                    epoch_test_var_sum = layer.epoch_test_var_sum / layer.epoch_test_var_mean_count
+                    f.write(f"{layer.number} {layer.normalized_shape} ev {epoch_test_var_mean:.2f} evs {epoch_test_var_sum:.2f} rv {layer.running_var_mean.item():.2f}: " + " ".join(map(lambda x: "{:.5f}".format(x), counts_test_ratio)) + "\n")

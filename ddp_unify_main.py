@@ -29,8 +29,8 @@ import sys
 from torchvision import models
 from demonet import DemoNet
 from utils import CustomSettings
-from my_layer_norm import MyLayerNorm
-from resnet import ResNet34, ResNet18
+from my_layer_norm import MyLayerNorm, get_ln_statistics
+from resnet import ResNet18, ResNet34, ResNet50
 
 def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
     lr = init_lr * (lr_gamma ** (epoch // lr_step_size))
@@ -88,11 +88,14 @@ def process(pn, args):
     # elif args.v_type == "18":
     #     model = ResNet18AvgCustom(model_custom_settings, args.if_wide)
     #     initialize_resnet(model)
-    elif args.v_type == "34" or args.v_type == "18":
+    elif args.v_type in ["18", "34", "50"]:
         if args.v_type == "18":
             model = ResNet18()
-        else:
+        elif args.v_type == "34":
             model = ResNet34()
+        else:
+            model = ResNet50()
+
         def replace_modules(model, model_custom_settings):
             for name, module in model.named_children():
                 if isinstance(module, torch.nn.Sequential):
@@ -428,8 +431,8 @@ def process(pn, args):
             else:
                 test_acc = ddp_test(args, testloader, model, epoch, best_acc, None, writer, world_pn, threshold_end)
         
-        # if pn == 0:
-        #     model.module.get_ln_statistics(epoch, f"{log_dir}/var.txt")
+        if pn == 0:
+            get_ln_statistics(model.module, epoch, f"{log_dir}/var.txt")
 
         for layer in model.module.modules():
             if isinstance(layer, MyLayerNorm):
@@ -444,7 +447,7 @@ def process(pn, args):
         # break
 
         if pn == 0:
-            if args.v_type != "demo" and args.v_type != "34" and args.v_type != "18":
+            if args.v_type != "demo" and args.v_type.isdigit() and not int(args.v_type) >= 18:
                 total, active = model.module.get_conv_density()
                 active_conv_rate = active / total
             else:
@@ -541,7 +544,7 @@ if __name__ == "__main__":
     parser.add_argument('--act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix', 'star'])
     parser.add_argument('--teacher_act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix', 'star'])
 
-    parser.add_argument('--v_type', type=str, default="18", choices = ["5", "6", "7", "18", "34", "demo"])
+    parser.add_argument('--v_type', type=str, default="18", choices = ["5", "6", "7", "18", "34", "50", "demo"])
     parser.add_argument('--old_version', type=ast.literal_eval, default=False)
 
     parser.add_argument('--cheb_params', nargs=3, type=float, default=[4, 0.1, 5], help='degree, a, b')
