@@ -114,6 +114,13 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
         x, y = x.cuda(), y.cuda()
         if mixup_fn is not None:
             x, y = mixup_fn(x, y)
+
+        loss = 0
+        loss_var = 0
+        loss_conv = 0
+        loss_fm = 0
+        loss_kd = 0
+        loss_ce = 0
         
         with torch.cuda.amp.autocast(enabled=args.use_amp, dtype=amp_dtype):
             if model_t is not None and (args.loss_conv_prune_factor > 0 or args.loss_fm_factor > 0 or args.loss_kd_factor > 0):
@@ -151,17 +158,13 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
 
             #             print(f"For module {name}: var_list max {max_val}, min {min_val}, mean {mean_val}")
             #     break
-           
-            loss = 0
 
             if args.loss_var1_factor > 0 or args.loss_var2_factor > 0:
-                loss_var = 0
                 for name, module in model_s.module.named_modules():
                     if isinstance(module, MyLayerNorm):
                         var_ratio = module.saved_var.mean() / module.running_var_mean
                         loss_var += (var_ratio - 1).pow(2) * args.loss_var2_factor + var_ratio * args.loss_var1_factor
                 loss += loss_var
-                train_loss_var += loss_var.item()
 
             if args.v_type != "demo" and args.v_type.isdigit() and not int(args.v_type) >= 18:
                 total_conv, active_conv = model_s.module.get_conv_density()
@@ -172,22 +175,28 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
             if args.loss_conv_prune_factor > 0:    
                 loss_conv = active_conv_rate * args.loss_conv_prune_factor
                 loss += loss_conv
-                train_loss_conv += loss_conv.item()
 
             if args.loss_fm_factor > 0:
                 loss_fm = sum(loss_fm_fun(x, y) for x, y in zip(fms_s[omit_fms:], fms_t[omit_fms:])) * args.loss_fm_factor
                 loss += loss_fm
-                train_loss_fm += loss_fm.item()
             if args.loss_kd_factor > 0:
                 # loss_kd = criterion_kd(out_s, out_t) * args.loss_kd_factor
                 loss_kd = criterion_kd(featuremap_s, featuremap_t) * args.loss_kd_factor
                 loss += loss_kd
-                train_loss_kd += loss_kd.item()
 
             if args.loss_ce_factor > 0:
                 loss_ce = criterion_ce(out_s, y) * args.loss_ce_factor
                 loss += loss_ce
-                train_loss_ce += loss_ce.item()
+
+        if torch.isnan(loss) or torch.isinf(loss):
+            # print("Loss is NaN, skipping this batch")
+            continue
+
+        train_loss_var += loss_var.item()
+        train_loss_conv += loss_conv.item()
+        train_loss_fm += loss_fm.item()
+        train_loss_kd += loss_kd.item()
+        train_loss_ce += loss_ce.item()
 
         if mixup_fn is not None:                
             top1_num = (out_s.argmax(dim=1) == y.argmax(dim=1)).float().sum().item()
