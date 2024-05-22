@@ -115,6 +115,8 @@ def process(pn, args):
 
         replace_modules(model, model_custom_settings)
 
+        initialize_resnet(model)
+
         # model.load_state_dict(models.resnet34(weights=models.resnet.ResNet34_Weights.DEFAULT).state_dict(), strict=True)
 
     else:
