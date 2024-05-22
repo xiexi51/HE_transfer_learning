@@ -114,13 +114,6 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
         x, y = x.cuda(), y.cuda()
         if mixup_fn is not None:
             x, y = mixup_fn(x, y)
-
-        loss = 0
-        loss_var = 0
-        loss_conv = 0
-        loss_fm = 0
-        loss_kd = 0
-        loss_ce = 0
         
         with torch.cuda.amp.autocast(enabled=args.use_amp, dtype=amp_dtype):
             if model_t is not None and (args.loss_conv_prune_factor > 0 or args.loss_fm_factor > 0 or args.loss_kd_factor > 0):
@@ -159,7 +152,10 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
             #             print(f"For module {name}: var_list max {max_val}, min {min_val}, mean {mean_val}")
             #     break
 
+            loss = 0
+
             if args.loss_var1_factor > 0 or args.loss_var2_factor > 0:
+                loss_var = 0
                 for name, module in model_s.module.named_modules():
                     if isinstance(module, MyLayerNorm):
                         var_ratio = module.saved_var.mean() / module.running_var_mean
@@ -191,12 +187,17 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
         if torch.isnan(loss) or torch.isinf(loss):
             # print("Loss is NaN, skipping this batch")
             continue
-
-        train_loss_var += loss_var.item()
-        train_loss_conv += loss_conv.item()
-        train_loss_fm += loss_fm.item()
-        train_loss_kd += loss_kd.item()
-        train_loss_ce += loss_ce.item()
+        
+        if args.loss_var1_factor > 0 or args.loss_var2_factor > 0:
+            train_loss_var += loss_var.item()
+        if args.loss_conv_prune_factor > 0:
+            train_loss_conv += loss_conv.item()
+        if args.loss_fm_factor > 0:
+            train_loss_fm += loss_fm.item()
+        if args.loss_kd_factor > 0:
+            train_loss_kd += loss_kd.item()
+        if args.loss_ce_factor > 0:
+            train_loss_ce += loss_ce.item()
 
         if mixup_fn is not None:                
             top1_num = (out_s.argmax(dim=1) == y.argmax(dim=1)).float().sum().item()
