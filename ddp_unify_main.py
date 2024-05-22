@@ -85,37 +85,37 @@ def process(pn, args):
         else:
             vanillanet = vanillanet_5_full_unify
         model = vanillanet(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, args.prune_1_1_kernel, args.old_version, args.vanilla_shortcut, args.vanilla_keep_bn)
-    # elif args.v_type == "18":
-    #     model = ResNet18AvgCustom(model_custom_settings, args.if_wide)
-    #     initialize_resnet(model)
-    elif args.v_type in ["18", "34", "50"]:
-        if args.v_type == "18":
-            model = ResNet18()
-        elif args.v_type == "34":
-            model = ResNet34()
-        else:
-            model = ResNet50()
-
-        def replace_modules(model, model_custom_settings, i=0):
-            for name, module in model.named_children():
-                if len(list(module.children())) > 0:
-                    i = replace_modules(module, model_custom_settings, i)
-                else:
-                    if isinstance(module, torch.nn.MaxPool2d):
-                        setattr(model, name, torch.nn.AvgPool2d(module.kernel_size, module.stride, module.padding))
-                    if isinstance(module, torch.nn.ReLU):
-                        setattr(model, name, custom_relu(model_custom_settings))
-                    if isinstance(module, torch.nn.BatchNorm2d):
-                        my_layer_norm = MyLayerNorm()
-                        my_layer_norm.number = i
-                        my_layer_norm.setup(model_custom_settings)
-                        setattr(model, name, my_layer_norm)
-                        i += 1
-            return i
-
-        replace_modules(model, model_custom_settings)
-
+    elif args.v_type == "18":
+        model = ResNet18AvgCustom(model_custom_settings, args.if_wide)
         initialize_resnet(model)
+    # elif args.v_type in ["18", "34", "50"]:
+    #     if args.v_type == "18":
+    #         model = ResNet18()
+    #     elif args.v_type == "34":
+    #         model = ResNet34()
+    #     else:
+    #         model = ResNet50()
+
+    #     def replace_modules(model, model_custom_settings, i=0):
+    #         for name, module in model.named_children():
+    #             if len(list(module.children())) > 0:
+    #                 i = replace_modules(module, model_custom_settings, i)
+    #             else:
+    #                 if isinstance(module, torch.nn.MaxPool2d):
+    #                     setattr(model, name, torch.nn.AvgPool2d(module.kernel_size, module.stride, module.padding))
+    #                 if isinstance(module, torch.nn.ReLU):
+    #                     setattr(model, name, custom_relu(model_custom_settings))
+    #                 if isinstance(module, torch.nn.BatchNorm2d):
+    #                     my_layer_norm = MyLayerNorm()
+    #                     my_layer_norm.number = i
+    #                     my_layer_norm.setup(model_custom_settings)
+    #                     setattr(model, name, my_layer_norm)
+    #                     i += 1
+    #         return i
+
+    #     replace_modules(model, model_custom_settings)
+
+    #     initialize_resnet(model)
 
         # model.load_state_dict(models.resnet34(weights=models.resnet.ResNet34_Weights.DEFAULT).state_dict(), strict=True)
 
@@ -149,8 +149,8 @@ def process(pn, args):
     if args.v_type != "demo":
         dummy_input = torch.rand(10, 3, 224, 224) 
         model.eval()
-        # model((dummy_input, 0, 1))
-        model(dummy_input)
+        model((dummy_input, 0, 1))
+        # model(dummy_input)
 
     checkpoint = None
 

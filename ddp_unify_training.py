@@ -123,7 +123,7 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
                         out_t, fms_t, featuremap_t = model_t((x, -1, 1))
                     else:
                         out_t, fms_t, featuremap_t = model_t((x, -1, 1))
-            if args.v_type != "demo" and args.v_type.isdigit() and not int(args.v_type) >= 18:
+            if args.v_type != "demo" and args.v_type.isdigit() and not int(args.v_type) >= 50:
                 set_forward_with_fms(model_s, True)
                 if mask is not None:
                     out_s, fms_s, featuremap_s = model_s((x, mask_current, threshold_end))
@@ -163,7 +163,7 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
                 loss += loss_var
                 train_loss_var += loss_var.item()
 
-            if args.v_type != "demo" and args.v_type.isdigit() and not int(args.v_type) >= 18:
+            if args.v_type != "demo" and args.v_type.isdigit() and not int(args.v_type) >= 50:
                 total_conv, active_conv = model_s.module.get_conv_density()
                 active_conv_rate = active_conv / total_conv
             else:
@@ -277,7 +277,7 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, world_pn, t
         
         with torch.cuda.amp.autocast(enabled=args.use_amp, dtype=amp_dtype):
             with torch.no_grad():
-                if args.v_type != "demo" and args.v_type.isdigit() and not int(args.v_type) >= 18:
+                if args.v_type != "demo" and args.v_type.isdigit() and not int(args.v_type) >= 34:
                     set_forward_with_fms(model, False)
                     if mask is not None:
                         out, _ = model((x, mask, threshold))
