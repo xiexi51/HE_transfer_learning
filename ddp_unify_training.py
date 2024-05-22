@@ -184,8 +184,13 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
                 loss_ce = criterion_ce(out_s, y) * args.loss_ce_factor
                 loss += loss_ce
 
-        if torch.isnan(loss) or torch.isinf(loss):
-            # print("Loss is NaN, skipping this batch")
+        nan_flag = torch.tensor(0.0).cuda()
+        if torch.isnan(loss).any() or torch.isinf(loss).any():
+            nan_flag = torch.tensor(1.0).cuda()
+
+        dist.all_reduce(nan_flag, op=dist.ReduceOp.SUM)
+        if nan_flag.item() > 0:
+            # print("NaN detected, skipping this batch")
             continue
         
         if args.loss_var1_factor > 0 or args.loss_var2_factor > 0:
@@ -225,6 +230,9 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
         loss /= update_freq
         # assert math.isfinite(loss)
         scaler.scale(loss).backward(create_graph=hasattr(optimizer, 'is_second_order') and optimizer.is_second_order)
+
+
+
         accumulated_batches += 1
         train_loss += loss.item()
         if accumulated_batches == update_freq:
