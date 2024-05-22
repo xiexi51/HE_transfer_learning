@@ -11,8 +11,9 @@ class custom_relu(nn.Module):
         super().__init__()
         self.custom_settings = custom_settings
         self.relu = None
+        self.mask = 0
     
-    def forward(self, x, mask=0):
+    def forward(self, x):
         if self.relu is None:
             num_channels = x.shape[1]
             if self.custom_settings.relu_type == "channel":
@@ -28,11 +29,11 @@ class custom_relu(nn.Module):
         if isinstance(self.relu, nn.ReLU) or isinstance(self.relu, star_relu):
             x = self.relu(x)
         else:
-            x = self.relu(x, mask)
+            x = self.relu(x, self.mask)
         return x
 
-    def get_relu_density(self, mask):
-        return self.relu.get_relu_density(mask)
+    def get_relu_density(self):
+        return self.relu.get_relu_density(self.mask)
 
 class Conv2dPruned(nn.Conv2d):
     def __init__(self, custom_settings, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):

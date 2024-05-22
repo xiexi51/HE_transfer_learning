@@ -393,6 +393,11 @@ def process(pn, args):
         train_sampler.set_epoch(epoch)
         mask = mask_provider.get_mask(epoch)
         mask_begin, mask_end = mask
+
+        for module in model.module.modules():
+            if isinstance(module, custom_relu):
+                module.mask = mask_end
+
         threshold = threshold_provider.get_mask(epoch)
         threshold_begin, threshold_end = threshold
         if threshold_end < args.threshold_min:
@@ -401,7 +406,7 @@ def process(pn, args):
         if args.running_var_mean_epoch >= 0 and epoch == args.running_var_mean_epoch:
             args.loss_var1_factor = store_loss_var1_factor
             args.loss_var2_factor = store_loss_var2_factor
-            for name, module in model.module.named_modules():
+            for module in model.module.modules():
                 if isinstance(module, MyLayerNorm):
                     module.use_running_var_mean = True
 
