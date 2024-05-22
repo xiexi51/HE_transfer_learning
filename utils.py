@@ -59,7 +59,7 @@ def change_print_for_distributed(is_master):
 class CustomSettings:
     def __init__(self, relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, norm_type, cheb_params, 
                  training_use_cheb, var_norm_boundary, ln_momentum, ln_use_quad, ln_trainable_quad_finetune, ln_quad_coeffs, 
-                 ln_quad_finetune_factors):
+                 ln_quad_finetune_factors, ln_x_scaler):
         self.relu_type = relu_type
         self.poly_weight_inits = poly_weight_inits
         self.poly_factors = poly_factors
@@ -74,6 +74,7 @@ class CustomSettings:
         self.ln_trainable_quad_finetune = ln_trainable_quad_finetune
         self.ln_quad_coeffs = ln_quad_coeffs
         self.ln_quad_finetune_factors = ln_quad_finetune_factors
+        self.ln_x_scaler = ln_x_scaler
 
 class Lookahead(Optimizer):
     def __init__(self, base_optimizer, alpha=0.5, k=1):

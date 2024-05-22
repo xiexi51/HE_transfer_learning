@@ -106,6 +106,8 @@ class MyLayerNorm(Module):
         self.var_norm_boundary = custom_settings.var_norm_boundary
         self.ln_momentum = custom_settings.ln_momentum
 
+        self.ln_x_scaler = custom_settings.ln_x_scaler
+
         self.norm_type = custom_settings.norm_type
 
         self.use_quad = custom_settings.ln_use_quad
@@ -126,6 +128,8 @@ class MyLayerNorm(Module):
             if self.norm_type == "my_layernorm" and self.elementwise_affine:
                 self.gain = nn.Parameter(torch.ones(self.normalized_shape))
                 self.bias = nn.Parameter(torch.zeros(self.normalized_shape))
+
+        
 
         if self.norm_type == "layernorm":
             if self.origin_ln is None:
