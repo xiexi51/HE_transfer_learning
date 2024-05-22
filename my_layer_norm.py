@@ -129,7 +129,7 @@ class MyLayerNorm(Module):
                 self.gain = nn.Parameter(torch.ones(self.normalized_shape))
                 self.bias = nn.Parameter(torch.zeros(self.normalized_shape))
 
-        
+        x *= self.ln_x_scaler
 
         if self.norm_type == "layernorm":
             if self.origin_ln is None:
