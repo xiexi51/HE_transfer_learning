@@ -84,7 +84,14 @@ def process(pn, args):
             vanillanet = vanillanet_7_full_unify
         else:
             vanillanet = vanillanet_5_full_unify
-        model = vanillanet(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, args.prune_1_1_kernel, args.old_version, args.vanilla_shortcut, args.vanilla_keep_bn)
+        model = vanillanet(model_custom_settings, args.vanilla_shortcut, args.vanilla_keep_bn)
+        _i = 0
+        for module in model.modules():
+            if isinstance(module, MyLayerNorm):
+                module.number = _i
+                _i += 1
+                module.setup(model_custom_settings)
+
     # elif args.v_type == "18":
     #     model = ResNet18AvgCustom(model_custom_settings, args.if_wide)
     #     initialize_resnet(model)
@@ -129,7 +136,7 @@ def process(pn, args):
 
     if args.teacher_file is not None:
         if args.v_type in ["5", "6", "7"]:
-            model_t = vanillanet(args.teacher_act_relu_type, [0, 0, 0], [0, 0, 0], args.teacher_prune_type, args.teacher_prune_1_1_kernel, old_version=args.old_version, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
+            model_t = vanillanet(teacher_custom_settings, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
         elif args.v_type == "18":
             model_t = ResNet18AvgCustom(teacher_custom_settings, args.if_wide)
             
@@ -149,8 +156,8 @@ def process(pn, args):
     if args.v_type != "demo":
         dummy_input = torch.rand(10, 3, 224, 224) 
         model.eval()
-        # model((dummy_input, 0, 1))
-        model(dummy_input)
+        model((dummy_input, 0, 1))
+        # model(dummy_input)
 
     checkpoint = None
 
