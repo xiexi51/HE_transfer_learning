@@ -416,6 +416,11 @@ def process(pn, args):
             for module in model.module.modules():
                 if isinstance(module, MyLayerNorm):
                     module.use_running_var_mean = True
+        
+        if args.filter_var_mean_epoch >= 0 and epoch == args.filter_var_mean_epoch:
+            for module in model.module.modules():
+                if isinstance(module, MyLayerNorm):
+                    module.filter_var_mean = True
 
         act_learn = 0
 
@@ -574,6 +579,7 @@ if __name__ == "__main__":
     parser.add_argument('--ln_quad_coeffs', nargs=3, type=float, default=[0.03, 10, 0.2])
     parser.add_argument('--ln_quad_finetune_factors', nargs=3, type=float, default=[0.0001, 0.1, 0.001])
     parser.add_argument('--ln_x_scaler', type=float, default=0.2)
+    parser.add_argument('--filter_var_mean_epoch', type=int, default=10)
 
     parser.add_argument('--loss_var1_factor', default=0, type=float)
     parser.add_argument('--loss_var2_factor', default=0, type=float)

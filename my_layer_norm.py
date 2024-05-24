@@ -63,8 +63,10 @@ class MyLayerNorm(Module):
         self.var_norm_boundary = 3
         self.momentum = None
 
+        self.filter_var_mean = False
+
         self.norm_type = "my_layernorm"
-        self.origin_ln = None
+        self.origin_norm = None
 
         self.use_quad = True
         self.trainable_quad_finetune = True
@@ -132,9 +134,13 @@ class MyLayerNorm(Module):
         x *= self.ln_x_scaler
 
         if self.norm_type == "layernorm":
-            if self.origin_ln is None:
-                self.origin_ln = nn.LayerNorm(self.normalized_shape, eps=self.eps, elementwise_affine=self.elementwise_affine)
-            return self.origin_ln(x)
+            if self.origin_norm is None:
+                self.origin_norm = nn.LayerNorm(self.normalized_shape, eps=self.eps, elementwise_affine=self.elementwise_affine)
+            return self.origin_norm(x)
+        elif self.norm_type == "batchnorm":
+            if self.origin_norm is None:
+                self.origin_norm = nn.BatchNorm2d(x.size()[1], eps=self.eps)
+            return self.origin_norm(x)
 
         exponential_average_factor = 0.0
 
@@ -160,6 +166,14 @@ class MyLayerNorm(Module):
         self.saved_var = var
         
         var_mean = var.mean()
+
+        if self.training and self.filter_var_mean:
+            if var_mean > self.running_var_mean * 10:
+                x_norm = (x - mean) / torch.sqrt(var + self.eps)
+                if self.elementwise_affine:
+                    x_norm = self.gain * x_norm + self.bias
+                return x_norm
+                
 
         if self.training:
             self.epoch_train_var_mean += var_mean.item()
