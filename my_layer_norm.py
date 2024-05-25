@@ -61,6 +61,8 @@ class MyLayerNorm(Module):
         self.cheb = MyCheb()
         self.use_running_var_mean = False
         self.var_norm_boundary = 3
+
+        self.group_size = 64
         self.momentum = None
 
         self.filter_var_mean = False
@@ -75,7 +77,7 @@ class MyLayerNorm(Module):
         self.quad_finetune_param = None
 
         self.num_batches_tracked = nn.Parameter(torch.zeros(1), requires_grad=False)
-        self.running_var_mean = nn.Parameter(torch.ones(1), requires_grad=False)
+        self.running_var_mean = None
 
         self.normalized_shape = None
         self.eps = eps
@@ -91,13 +93,13 @@ class MyLayerNorm(Module):
         self.total_counts_train = None
         self.total_counts_test = None
 
-        self.epoch_train_var_mean = 0
-        self.epoch_train_var_sum = 0
-        self.epoch_train_var_mean_count = 0
+        self.epoch_train_var_mean = None
+        self.epoch_train_var_sum = None
+        self.epoch_train_var_mean_count = None
 
-        self.epoch_test_var_mean = 0
-        self.epoch_test_var_sum = 0
-        self.epoch_test_var_mean_count = 0
+        self.epoch_test_var_mean = None
+        self.epoch_test_var_sum = None
+        self.epoch_test_var_mean_count = None
 
         self.saved_var = None
 
@@ -109,6 +111,8 @@ class MyLayerNorm(Module):
         self.ln_momentum = custom_settings.ln_momentum
 
         self.ln_x_scaler = custom_settings.ln_x_scaler
+
+        self.group_size = custom_settings.ln_group_size
 
         self.norm_type = custom_settings.norm_type
 
@@ -126,10 +130,23 @@ class MyLayerNorm(Module):
 
         if self.normalized_shape is None:
             self.normalized_shape = x.size()[1:]
+        
+        if self.running_var_mean is None:
+            self.running_var_mean = nn.Parameter(torch.ones(x.shape[1] // self.group_size), requires_grad=False)
             # Create parameters for $\gamma$ and $\beta$ for gain and bias
             if self.norm_type == "my_layernorm" and self.elementwise_affine:
                 self.gain = nn.Parameter(torch.ones(self.normalized_shape))
                 self.bias = nn.Parameter(torch.zeros(self.normalized_shape))
+
+        if self.epoch_train_var_mean is None:
+            self.epoch_train_var_mean = 0
+            self.epoch_train_var_sum = 0
+            self.epoch_train_var_mean_count = 0
+        
+        if self.epoch_test_var_mean is None:
+            self.epoch_test_var_mean = 0
+            self.epoch_test_var_sum = 0
+            self.epoch_test_var_mean_count = 0
 
         x *= self.ln_x_scaler
 
@@ -151,48 +168,56 @@ class MyLayerNorm(Module):
                 if exponential_average_factor < self.momentum:
                     exponential_average_factor = self.momentum
 
-        # The dimensions to calculate the mean and variance on
-        dims = [-(i + 1) for i in range(len(self.normalized_shape))]
+        assert x.shape[1] % self.group_size == 0, f"Number of channels must be divisible by {self.group_size}."
 
-        # Calculate the mean of all elements;
-        # i.e. the means for each element $\mathbb{E}[X]$
-        mean = x.mean(dim=dims, keepdim=True)
-        # Calculate the squared mean of all elements;
-        # i.e. the means for each element $\mathbb{E}[X^2]$
-        mean_x2 = (x ** 2).mean(dim=dims, keepdim=True)
-        # Variance of all element $Var[X] = \mathbb{E}[X^2] - \mathbb{E}[X]^2$
-        var = mean_x2 - mean ** 2
+        x_reshaped = x.view(x.shape[0], -1, self.group_size, *x.shape[2:])
+        dims = [-(i + 1) for i in range(len(x.shape)-1)]
+        mean = x_reshaped.mean(dim=dims, keepdim=True)
+        mean_x2 = (x_reshaped * x_reshaped).mean(dim=dims, keepdim=True)
+        var = mean_x2 - mean * mean
+
+        x_norm = torch.zeros_like(x_reshaped, dtype=x_reshaped.dtype, device=x_reshaped.device)
 
         self.saved_var = var
         
-        var_mean = var.mean()
+        var_mean = var.mean(dim=0).squeeze()
 
+        # if self.training and self.filter_var_mean:
+        #     if var_mean > self.running_var_mean * 10:
+        #         x_norm = (x - mean) / torch.sqrt(var + self.eps)
+        #         if self.elementwise_affine:
+        #             x_norm = self.gain * x_norm + self.bias
+        #         return x_norm
+        
         if self.training and self.filter_var_mean:
-            if var_mean > self.running_var_mean * 10:
-                x_norm = (x - mean) / torch.sqrt(var + self.eps)
-                if self.elementwise_affine:
-                    x_norm = self.gain * x_norm + self.bias
-                return x_norm
-                
+            mask = var_mean <= self.running_var_mean * self.var_norm_boundary
+        else:
+            mask = torch.ones(var_mean.shape, dtype=torch.bool, device=var_mean.device)
+        
+        mask = mask.squeeze()
+        mask_expanded = mask.view(1, -1, 1, 1, 1).expand(x_reshaped.shape[0], x_reshaped.shape[1], 1, 1, 1)
+        mask_expanded2 = mask.view(1, -1, 1, 1, 1).expand(x_reshaped.shape[0], x_reshaped.shape[1], x_reshaped.shape[2], x_reshaped.shape[3], x_reshaped.shape[4])
 
         if self.training:
-            self.epoch_train_var_mean += var_mean.item()
-            self.epoch_train_var_sum += var.sum().item()
+            self.epoch_train_var_mean += var_mean[mask].mean().item()
+            self.epoch_train_var_sum += var[mask_expanded].sum().item()
             self.epoch_train_var_mean_count += 1
         else:
-            self.epoch_test_var_mean += var_mean.item()
-            self.epoch_test_var_sum += var.sum().item()
+            self.epoch_test_var_mean += var_mean[mask].mean().item()
+            self.epoch_test_var_sum += var[mask_expanded].sum().item()
             self.epoch_test_var_mean_count += 1
 
         with torch.no_grad():
             if self.training:
-                self.running_var_mean.data = exponential_average_factor * var_mean + (1 - exponential_average_factor) * self.running_var_mean
+                self.running_var_mean[mask].data = exponential_average_factor * var_mean[mask] + (1 - exponential_average_factor) * self.running_var_mean[mask]
 
             if not self.training or self.use_running_var_mean:
-                var_normed = var / self.running_var_mean
+                var_normed = var / self.running_var_mean.view(1, -1, 1, 1, 1)
                 
-                bins = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, np.inf]
-                counts, _ = np.histogram(var_normed.detach().cpu().numpy(), bins=bins)
+                var_normed_counts = var_normed[mask_expanded].detach().cpu().numpy()
+                
+                bins = [0, 1, 2, 3, 4, 5, np.inf]
+                counts, _ = np.histogram(var_normed_counts, bins=bins)
 
                 if self.training:
                     if self.counts_train is None:
@@ -205,38 +230,34 @@ class MyLayerNorm(Module):
                     else:
                         self.counts_test += counts
 
-        # if self.training:
-        #     if len(self.train_var_list) < 1000:
-        #         self.train_var_list.append(var + self.eps)
-        # else:
-        #     if len(self.test_var_list) < 1000:
-        #         self.test_var_list.append(var + self.eps)
-
         if self.training and not self.training_use_cheb:
-            x_norm = (x - mean) / torch.sqrt(var + self.eps)
+            x_norm = (x_reshaped - mean) / torch.sqrt(var + self.eps)
         else:
             if self.training and not self.use_running_var_mean:
-                var_normed = var / var_mean
-                var_rescale = torch.sqrt(var_mean)
+                var_normed = var / var_mean.view(1, -1, 1, 1, 1)
+                var_rescale = torch.sqrt(var_mean.view(1, -1, 1, 1, 1))
             else:
-                var_normed = var / self.running_var_mean
-                var_rescale = torch.sqrt(self.running_var_mean)
+                var_normed = var / self.running_var_mean.view(1, -1, 1, 1, 1)
+                var_rescale = torch.sqrt(self.running_var_mean.view(1, -1, 1, 1, 1))
             
             if self.use_quad:
                 _a = self.quad_coeffs[0] + self.quad_finetune_param[0] * self.quad_finetune_factors[0]
                 _b = self.quad_coeffs[1] + self.quad_finetune_param[1] * self.quad_finetune_factors[1]
                 _c = self.quad_coeffs[2] + self.quad_finetune_param[2] * self.quad_finetune_factors[2]
-                cheb_result = _a * (var_normed - _b)**2 + _c
+                cheb_result = _a * (var_normed - _b) * (var_normed - _b) + _c
             else:
                 cheb_result = self.cheb.calculate(var_normed + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
 
-            if self.training:
-                var_mask = var_normed > self.var_norm_boundary
-                cheb_result[var_mask] = 1.0 / torch.sqrt(var_normed[var_mask] + self.eps)
+            # if self.training:
+            #     var_mask = var_normed > self.var_norm_boundary
+            #     cheb_result[var_mask] = 1.0 / torch.sqrt(var_normed[var_mask] + self.eps)
 
-            x_norm = (x - mean) * cheb_result / (var_rescale * 0.35)
+            x_norm[mask_expanded2] = ((x_reshaped - mean) * cheb_result.to(torch.bfloat16) / (var_rescale.to(torch.bfloat16) * 0.35))[mask_expanded2]
 
-        # Scale and shift $$\text{LN}(x) = \gamma \hat{X} + \beta$$
+            x_norm[~mask_expanded2] = ((x_reshaped - mean) / torch.sqrt(var + self.eps))[~mask_expanded2]
+
+        x_norm = x_norm.view(x.shape)
+
         if self.elementwise_affine:
             x_norm = self.gain * x_norm + self.bias
 
@@ -263,7 +284,7 @@ def process_layer(layer, counts_type, f):
             counts_ratio = layer_counts / layer_counts.sum()
             epoch_var_mean = getattr(layer, f"epoch_{counts_type}_var_mean", 0) / getattr(layer, f"epoch_{counts_type}_var_mean_count", 1)
             epoch_var_sum = getattr(layer, f"epoch_{counts_type}_var_sum", 0) / getattr(layer, f"epoch_{counts_type}_var_mean_count", 1)
-            f.write(f"{layer.number} {layer.normalized_shape} ev {epoch_var_mean:.2f} evs {epoch_var_sum:.2f} rv {layer.running_var_mean.item():.2f}: " + " ".join(map(lambda x: "{:.5f}".format(x), counts_ratio)) + "\n")
+            f.write(f"{layer.number} {layer.normalized_shape} ev {epoch_var_mean:.2f} evs {epoch_var_sum:.2f} rv_mean {layer.running_var_mean.mean().item():.2f} rv_max {layer.running_var_mean.max().item():.2f} rv_min {layer.running_var_mean.min().item():.2f}: " + " ".join(map(lambda x: "{:.5f}".format(x), counts_ratio)) + "\n")
     elif len(list(layer.children())) > 0:
         for child in layer.children():
             process_layer(child, counts_type, f)

@@ -74,7 +74,7 @@ def process(pn, args):
     model_custom_settings = CustomSettings(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, 
                                            args.prune_1_1_kernel, args.norm_type, args.cheb_params, args.training_use_cheb, 
                                            args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_trainable_quad_finetune,
-                                           args.ln_quad_coeffs, args.ln_quad_finetune_factors, args.ln_x_scaler)
+                                           args.ln_quad_coeffs, args.ln_quad_finetune_factors, args.ln_x_scaler, args.ln_group_size)
 
     print("v_type = ", args.v_type)
     if args.v_type in ["5", "6", "7"]:
@@ -132,7 +132,7 @@ def process(pn, args):
     teacher_custom_settings = CustomSettings(args.teacher_act_relu_type, [0, 0, 0], [0, 0, 0], args.teacher_prune_type, 
                                              args.teacher_prune_1_1_kernel, args.teacher_norm_type, args.cheb_params, args.training_use_cheb, 
                                              args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_trainable_quad_finetune,
-                                             args.ln_quad_coeffs, args.ln_quad_finetune_factors, args.ln_x_scaler)
+                                             args.ln_quad_coeffs, args.ln_quad_finetune_factors, args.ln_x_scaler, args.ln_group_size)
 
     if args.teacher_file is not None:
         if args.v_type in ["5", "6", "7"]:
@@ -154,7 +154,7 @@ def process(pn, args):
         model_t = None
     
     if args.v_type != "demo":
-        dummy_input = torch.rand(10, 3, 224, 224) 
+        dummy_input = torch.rand(10, 3, 224, 224)
         model.eval()
         model((dummy_input, 0, 1))
         # model(dummy_input)
@@ -393,6 +393,11 @@ def process(pn, args):
 
     recent_checkpoints = []
 
+    # if args.use_amp and args.bf16:
+    #     for module in model.module.modules():
+    #         if isinstance(module, MyLayerNorm):
+    #             module.running_var_mean = module.running_var_mean.to(torch.bfloat16)
+
     for epoch in range(start_epoch, args.total_epochs):
         if args.lr_step_size > 0:
             adjust_learning_rate(optimizer, epoch, args.lr, args.lr_step_size, args.lr_gamma)
@@ -572,13 +577,14 @@ if __name__ == "__main__":
     parser.add_argument('--cheb_params', nargs=3, type=float, default=[4, 0.1, 5], help='degree, a, b')
     parser.add_argument('--training_use_cheb', type=ast.literal_eval, default=False)
     parser.add_argument('--running_var_mean_epoch', type=int, default=3)
-    parser.add_argument('--var_norm_boundary', type=float, default=3)
+    parser.add_argument('--var_norm_boundary', type=float, default=5)
     parser.add_argument('--ln_momentum', type=float, default=None)
     parser.add_argument('--ln_use_quad', type=ast.literal_eval, default=True)
     parser.add_argument('--ln_trainable_quad_finetune', type=ast.literal_eval, default=False)
     parser.add_argument('--ln_quad_coeffs', nargs=3, type=float, default=[0.03, 10, 0.2])
     parser.add_argument('--ln_quad_finetune_factors', nargs=3, type=float, default=[0.0001, 0.1, 0.001])
     parser.add_argument('--ln_x_scaler', type=float, default=0.2)
+    parser.add_argument('--ln_group_size', type=int, default=64)
     parser.add_argument('--filter_var_mean_epoch', type=int, default=10)
 
     parser.add_argument('--loss_var1_factor', default=0, type=float)
