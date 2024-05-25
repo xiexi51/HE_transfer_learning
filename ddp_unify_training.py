@@ -152,6 +152,11 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
             #             print(f"For module {name}: var_list max {max_val}, min {min_val}, mean {mean_val}")
             #     break
 
+            for name, module in model_s.module.named_modules():
+                if isinstance(module, MyLayerNorm):
+                    dist.all_reduce(module.running_var_mean, op=dist.ReduceOp.SUM)
+                    module.running_var_mean /= dist.get_world_size()
+
             loss = 0
 
             if args.loss_var1_factor > 0 or args.loss_var2_factor > 0:
