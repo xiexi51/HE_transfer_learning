@@ -170,17 +170,20 @@ class MyLayerNorm(Module):
 
         assert x.shape[1] % self.group_size == 0, f"Number of channels must be divisible by {self.group_size}."
 
-        x_reshaped = x.view(x.shape[0], -1, self.group_size, *x.shape[2:])
+        x_grouped = x.view(x.shape[0], -1, self.group_size, *x.shape[2:])
         dims = [-(i + 1) for i in range(len(x.shape)-1)]
-        mean = x_reshaped.mean(dim=dims, keepdim=True)
-        mean_x2 = (x_reshaped * x_reshaped).mean(dim=dims, keepdim=True)
-        var = mean_x2 - mean * mean
+        mean = x_grouped.mean(dim=dims, keepdim=True)
+        mean_x2 = (x_grouped ** 2).mean(dim=dims, keepdim=True)
+        var = mean_x2 - mean ** 2
 
-        x_norm = torch.zeros_like(x_reshaped, dtype=x_reshaped.dtype, device=x_reshaped.device)
+        # x_norm = torch.zeros_like(x_reshaped, dtype=x_reshaped.dtype, device=x_reshaped.device)
 
-        self.saved_var = var
+        mean = mean.squeeze()
+        var = var.squeeze()
         
-        var_mean = var.mean(dim=0).squeeze()
+        var_mean = var.mean(dim=0)
+
+        self.saved_var = var_mean
 
         # if self.training and self.filter_var_mean:
         #     if var_mean > self.running_var_mean * 10:
@@ -189,74 +192,79 @@ class MyLayerNorm(Module):
         #             x_norm = self.gain * x_norm + self.bias
         #         return x_norm
         
-        if self.training and self.filter_var_mean:
-            mask = var_mean <= self.running_var_mean * self.var_norm_boundary
-        else:
-            mask = torch.ones(var_mean.shape, dtype=torch.bool, device=var_mean.device)
+        # if self.training and self.filter_var_mean:
+        #     mask = var_mean <= self.running_var_mean * self.var_norm_boundary
+        # else:
+        #     mask = torch.ones(var_mean.shape, dtype=torch.bool, device=var_mean.device)
         
-        mask = mask.squeeze()
-        mask_expanded = mask.view(1, -1, 1, 1, 1).expand(x_reshaped.shape[0], x_reshaped.shape[1], 1, 1, 1)
-        mask_expanded2 = mask.view(1, -1, 1, 1, 1).expand(x_reshaped.shape[0], x_reshaped.shape[1], x_reshaped.shape[2], x_reshaped.shape[3], x_reshaped.shape[4])
+        mean = mean.repeat_interleave(self.group_size, dim=1)
+        var = var.repeat_interleave(self.group_size, dim=1)
+
+        if self.training and self.filter_var_mean:
+            if (var_mean > self.running_var_mean * 10).any():
+                x_norm = (x - mean) / torch.sqrt(var + self.eps)
+                if self.elementwise_affine:
+                    x_norm = self.gain * x_norm + self.bias
+                return x_norm
 
         if self.training:
-            self.epoch_train_var_mean += var_mean[mask].mean().item()
-            self.epoch_train_var_sum += var[mask_expanded].sum().item()
+            self.epoch_train_var_mean += var_mean.mean().item()
+            self.epoch_train_var_sum += 0
             self.epoch_train_var_mean_count += 1
         else:
-            self.epoch_test_var_mean += var_mean[mask].mean().item()
-            self.epoch_test_var_sum += var[mask_expanded].sum().item()
+            self.epoch_test_var_mean += var_mean.mean().item()
+            self.epoch_test_var_sum += 0
             self.epoch_test_var_mean_count += 1
 
         with torch.no_grad():
             if self.training:
-                self.running_var_mean[mask].data = exponential_average_factor * var_mean[mask] + (1 - exponential_average_factor) * self.running_var_mean[mask]
+                self.running_var_mean.data = exponential_average_factor * var_mean + (1 - exponential_average_factor) * self.running_var_mean
 
-            if not self.training or self.use_running_var_mean:
-                var_normed = var / self.running_var_mean.view(1, -1, 1, 1, 1)
+            # if not self.training or self.use_running_var_mean:
+            #     var_normed = var / self.running_var_mean.view(1, -1, 1, 1, 1)
                 
-                var_normed_counts = var_normed[mask_expanded].detach().cpu().numpy()
+            #     var_normed_counts = var_normed[mask_expanded].detach().cpu().numpy()
                 
-                bins = [0, 1, 2, 3, 4, 5, np.inf]
-                counts, _ = np.histogram(var_normed_counts, bins=bins)
+            #     bins = [0, 1, 2, 3, 4, 5, np.inf]
+            #     counts, _ = np.histogram(var_normed_counts, bins=bins)
 
-                if self.training:
-                    if self.counts_train is None:
-                        self.counts_train = counts
-                    else:
-                        self.counts_train += counts
-                else:
-                    if self.counts_test is None:
-                        self.counts_test = counts
-                    else:
-                        self.counts_test += counts
+            #     if self.training:
+            #         if self.counts_train is None:
+            #             self.counts_train = counts
+            #         else:
+            #             self.counts_train += counts
+            #     else:
+            #         if self.counts_test is None:
+            #             self.counts_test = counts
+            #         else:
+            #             self.counts_test += counts
+
+        var_mean = var_mean.repeat_interleave(self.group_size)
+        repeat_running_var_mean = self.running_var_mean.repeat(self.group_size)
 
         if self.training and not self.training_use_cheb:
-            x_norm = (x_reshaped - mean) / torch.sqrt(var + self.eps)
+            x_norm = (x - mean) / torch.sqrt(var + self.eps)
         else:
             if self.training and not self.use_running_var_mean:
-                var_normed = var / var_mean.view(1, -1, 1, 1, 1)
-                var_rescale = torch.sqrt(var_mean.view(1, -1, 1, 1, 1))
+                var_normed = var / var_mean
+                var_rescale = torch.sqrt(var_mean)
             else:
-                var_normed = var / self.running_var_mean.view(1, -1, 1, 1, 1)
-                var_rescale = torch.sqrt(self.running_var_mean.view(1, -1, 1, 1, 1))
+                var_normed = var / repeat_running_var_mean
+                var_rescale = torch.sqrt(repeat_running_var_mean)
             
             if self.use_quad:
                 _a = self.quad_coeffs[0] + self.quad_finetune_param[0] * self.quad_finetune_factors[0]
                 _b = self.quad_coeffs[1] + self.quad_finetune_param[1] * self.quad_finetune_factors[1]
                 _c = self.quad_coeffs[2] + self.quad_finetune_param[2] * self.quad_finetune_factors[2]
-                cheb_result = _a * (var_normed - _b) * (var_normed - _b) + _c
+                cheb_result = _a * (var_normed - _b) ** 2 + _c
             else:
                 cheb_result = self.cheb.calculate(var_normed + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
 
-            # if self.training:
-            #     var_mask = var_normed > self.var_norm_boundary
-            #     cheb_result[var_mask] = 1.0 / torch.sqrt(var_normed[var_mask] + self.eps)
+            if self.training:
+                var_mask = var_normed > self.var_norm_boundary
+                cheb_result[var_mask] = 1.0 / torch.sqrt(var_normed[var_mask] + self.eps)
 
-            x_norm[mask_expanded2] = ((x_reshaped - mean) * cheb_result.to(torch.bfloat16) / (var_rescale.to(torch.bfloat16) * 0.35))[mask_expanded2]
-
-            x_norm[~mask_expanded2] = ((x_reshaped - mean) / torch.sqrt(var + self.eps))[~mask_expanded2]
-
-        x_norm = x_norm.view(x.shape)
+            x_norm = (x - mean.unsqueeze(-1).unsqueeze(-1)) * cheb_result.unsqueeze(-1).unsqueeze(-1) / (var_rescale.unsqueeze(-1).unsqueeze(-1) * 0.35)
 
         if self.elementwise_affine:
             x_norm = self.gain * x_norm + self.bias

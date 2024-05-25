@@ -158,7 +158,7 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
                 loss_var = 0
                 for name, module in model_s.module.named_modules():
                     if isinstance(module, MyLayerNorm):
-                        var_ratio = (module.saved_var.mean(dim=0).squeeze() / module.running_var_mean).mean()
+                        var_ratio = (module.saved_var / module.running_var_mean).mean()
                         loss_var += (var_ratio - 1).pow(2) * args.loss_var2_factor + var_ratio * args.loss_var1_factor
                 loss += loss_var
 
