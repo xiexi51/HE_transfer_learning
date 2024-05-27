@@ -43,7 +43,7 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
     param_count = 0
 
     if args.pbar and world_pn == 0:
-        if act_learn is not None:
+        if False and act_learn is not None:
             desc = f"{epoch} Lr{optimizer.param_groups[0]['lr']:.2e} act{act_learn:.2f}"
         else:
             desc = f"{epoch} Lr{optimizer.param_groups[0]['lr']:.2e}"

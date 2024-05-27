@@ -208,11 +208,13 @@ class MyLayerNorm(Module):
 
         if self.training and self.filter_var_mean:
             if (var_mean > self.running_var_mean * 10).any():
-                self.filter_var_mean_times += 1
+                self.filter_var_mean_times = 1
                 x_norm = (x - mean) / torch.sqrt(var + self.eps)
                 if self.elementwise_affine:
                     x_norm = self.gain * x_norm + self.bias
                 return x_norm
+            else:
+                self.filter_var_mean_times = 0
 
         if self.training:
             self.epoch_train_var_mean += var_mean.mean().item()

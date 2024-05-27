@@ -465,7 +465,7 @@ def process(pn, args):
 
         for layer in model.module.modules():
             if isinstance(layer, MyLayerNorm):
-                layer.save_counts_to_total()
+                # layer.save_counts_to_total()
                 layer.epoch_train_var_mean = 0
                 layer.epoch_train_var_sum = 0
                 layer.epoch_train_var_mean_count = 0
