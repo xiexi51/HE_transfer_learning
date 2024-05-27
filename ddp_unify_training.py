@@ -100,6 +100,8 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
     prev_optimizer_state_dict = None
     undo_grad_signal = "-"
 
+    filtered = 0
+
     for iter, (x, y) in enumerate(pbar):
         if args.iter_break > 0 and iter >= args.iter_break:
             break
@@ -156,6 +158,7 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
                 if isinstance(module, MyLayerNorm):
                     dist.all_reduce(module.running_var_mean, op=dist.ReduceOp.SUM)
                     module.running_var_mean /= dist.get_world_size()
+                    filtered += module.filter_var_mean_times
 
             loss = 0
 
@@ -163,7 +166,7 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
                 loss_var = 0
                 for name, module in model_s.module.named_modules():
                     if isinstance(module, MyLayerNorm):
-                        var_ratio = (module.saved_var / module.running_var_mean).mean()
+                        var_ratio = (module.saved_var_mean / module.running_var_mean).mean()
                         loss_var += (var_ratio - 1).pow(2) * args.loss_var2_factor + var_ratio * args.loss_var1_factor
                 loss += loss_var
 
@@ -234,6 +237,7 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
 
         loss /= update_freq
         # assert math.isfinite(loss)
+        
         scaler.scale(loss).backward(create_graph=hasattr(optimizer, 'is_second_order') and optimizer.is_second_order)
 
 
@@ -258,7 +262,7 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
             accumulated_batches = 0 
         
         if args.pbar and world_pn == 0:
-            pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e},conv{active_conv_rate:.3f},var{train_loss_var/total:.2e} 1a {100*iter_train_acc:.1f}")
+            pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e},conv{active_conv_rate:.3f},var{train_loss_var/total:.2e} 1a {100*iter_train_acc:.1f} f {filtered}")
 
     # print(mask_current, mask[1])
 

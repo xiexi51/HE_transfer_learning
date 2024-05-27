@@ -398,6 +398,8 @@ def process(pn, args):
     #         if isinstance(module, MyLayerNorm):
     #             module.running_var_mean = module.running_var_mean.to(torch.bfloat16)
 
+    # torch.autograd.set_detect_anomaly(True)
+
     for epoch in range(start_epoch, args.total_epochs):
         if args.lr_step_size > 0:
             adjust_learning_rate(optimizer, epoch, args.lr, args.lr_step_size, args.lr_gamma)

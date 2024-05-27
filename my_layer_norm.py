@@ -66,6 +66,7 @@ class MyLayerNorm(Module):
         self.momentum = None
 
         self.filter_var_mean = False
+        self.filter_var_mean_times = 0
 
         self.norm_type = "my_layernorm"
         self.origin_norm = None
@@ -76,8 +77,8 @@ class MyLayerNorm(Module):
         self.quad_finetune_factors = [0.0001, 0.1, 0.001]
         self.quad_finetune_param = None
 
-        self.num_batches_tracked = nn.Parameter(torch.zeros(1), requires_grad=False)
-        self.running_var_mean = None
+        self.register_buffer('num_batches_tracked', torch.zeros(1))
+        # self.running_var_mean = None
 
         self.normalized_shape = None
         self.eps = eps
@@ -131,8 +132,11 @@ class MyLayerNorm(Module):
         if self.normalized_shape is None:
             self.normalized_shape = x.size()[1:]
         
-        if self.running_var_mean is None:
-            self.running_var_mean = nn.Parameter(torch.ones(x.shape[1] // self.group_size), requires_grad=False)
+        if not hasattr(self, 'running_var_mean'):
+            if self.group_size > 0:
+                self.register_buffer('running_var_mean', torch.ones(x.shape[1] // self.group_size))
+            else:
+                self.register_buffer('running_var_mean', torch.ones(1))
             # Create parameters for $\gamma$ and $\beta$ for gain and bias
             if self.norm_type == "my_layernorm" and self.elementwise_affine:
                 self.gain = nn.Parameter(torch.ones(self.normalized_shape))
@@ -168,22 +172,23 @@ class MyLayerNorm(Module):
                 if exponential_average_factor < self.momentum:
                     exponential_average_factor = self.momentum
 
-        assert x.shape[1] % self.group_size == 0, f"Number of channels must be divisible by {self.group_size}."
+        dims = [-(i + 1) for i in range(len(self.normalized_shape))]
 
-        x_grouped = x.view(x.shape[0], -1, self.group_size, *x.shape[2:])
-        dims = [-(i + 1) for i in range(len(x.shape)-1)]
-        mean = x_grouped.mean(dim=dims, keepdim=True)
-        mean_x2 = (x_grouped ** 2).mean(dim=dims, keepdim=True)
+        if self.group_size > 0:
+            assert x.shape[1] % self.group_size == 0, f"Number of channels must be divisible by {self.group_size}."
+            x_grouped = x.view(x.shape[0], -1, self.group_size, *x.shape[2:])
+            mean = x_grouped.mean(dim=dims, keepdim=False)
+            mean_x2 = (x_grouped ** 2).mean(dim=dims, keepdim=False)
+        else:
+            mean = x.mean(dim=dims, keepdim=True)
+            mean_x2 = (x ** 2).mean(dim=dims, keepdim=True)
         var = mean_x2 - mean ** 2
 
         # x_norm = torch.zeros_like(x_reshaped, dtype=x_reshaped.dtype, device=x_reshaped.device)
-
-        mean = mean.squeeze()
-        var = var.squeeze()
         
-        var_mean = var.mean(dim=0)
+        var_mean = var.mean(dim=0).squeeze()
 
-        self.saved_var = var_mean
+        self.saved_var_mean = var_mean
 
         # if self.training and self.filter_var_mean:
         #     if var_mean > self.running_var_mean * 10:
@@ -197,11 +202,13 @@ class MyLayerNorm(Module):
         # else:
         #     mask = torch.ones(var_mean.shape, dtype=torch.bool, device=var_mean.device)
         
-        mean = mean.repeat_interleave(self.group_size, dim=1)
-        var = var.repeat_interleave(self.group_size, dim=1)
+        if self.group_size > 0:
+            mean = mean.repeat_interleave(self.group_size, dim=1).unsqueeze(-1).unsqueeze(-1)
+            var = var.repeat_interleave(self.group_size, dim=1).unsqueeze(-1).unsqueeze(-1)
 
         if self.training and self.filter_var_mean:
             if (var_mean > self.running_var_mean * 10).any():
+                self.filter_var_mean_times += 1
                 x_norm = (x - mean) / torch.sqrt(var + self.eps)
                 if self.elementwise_affine:
                     x_norm = self.gain * x_norm + self.bias
@@ -214,33 +221,31 @@ class MyLayerNorm(Module):
         else:
             self.epoch_test_var_mean += var_mean.mean().item()
             self.epoch_test_var_sum += 0
-            self.epoch_test_var_mean_count += 1
+            self.epoch_test_var_mean_count += 1    
 
+        if self.group_size > 0:
+            var_mean = var_mean.repeat_interleave(self.group_size).unsqueeze(-1).unsqueeze(-1)
+            _running_var_mean = self.running_var_mean.repeat_interleave(self.group_size).unsqueeze(-1).unsqueeze(-1)
+        else:
+            _running_var_mean = self.running_var_mean
+        
         with torch.no_grad():
-            if self.training:
-                self.running_var_mean.data = exponential_average_factor * var_mean + (1 - exponential_average_factor) * self.running_var_mean
-
-            # if not self.training or self.use_running_var_mean:
-            #     var_normed = var / self.running_var_mean.view(1, -1, 1, 1, 1)
+            if not self.training or self.use_running_var_mean:
+                var_normed_counts = (var / _running_var_mean).squeeze().detach().cpu().numpy()
                 
-            #     var_normed_counts = var_normed[mask_expanded].detach().cpu().numpy()
-                
-            #     bins = [0, 1, 2, 3, 4, 5, np.inf]
-            #     counts, _ = np.histogram(var_normed_counts, bins=bins)
+                bins = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, np.inf]
+                counts, _ = np.histogram(var_normed_counts, bins=bins)
 
-            #     if self.training:
-            #         if self.counts_train is None:
-            #             self.counts_train = counts
-            #         else:
-            #             self.counts_train += counts
-            #     else:
-            #         if self.counts_test is None:
-            #             self.counts_test = counts
-            #         else:
-            #             self.counts_test += counts
-
-        var_mean = var_mean.repeat_interleave(self.group_size)
-        repeat_running_var_mean = self.running_var_mean.repeat(self.group_size)
+                if self.training:
+                    if self.counts_train is None:
+                        self.counts_train = counts
+                    else:
+                        self.counts_train += counts
+                else:
+                    if self.counts_test is None:
+                        self.counts_test = counts
+                    else:
+                        self.counts_test += counts
 
         if self.training and not self.training_use_cheb:
             x_norm = (x - mean) / torch.sqrt(var + self.eps)
@@ -249,8 +254,8 @@ class MyLayerNorm(Module):
                 var_normed = var / var_mean
                 var_rescale = torch.sqrt(var_mean)
             else:
-                var_normed = var / repeat_running_var_mean
-                var_rescale = torch.sqrt(repeat_running_var_mean)
+                var_normed = var / _running_var_mean
+                var_rescale = torch.sqrt(_running_var_mean)
             
             if self.use_quad:
                 _a = self.quad_coeffs[0] + self.quad_finetune_param[0] * self.quad_finetune_factors[0]
@@ -264,7 +269,11 @@ class MyLayerNorm(Module):
                 var_mask = var_normed > self.var_norm_boundary
                 cheb_result[var_mask] = 1.0 / torch.sqrt(var_normed[var_mask] + self.eps)
 
-            x_norm = (x - mean.unsqueeze(-1).unsqueeze(-1)) * cheb_result.unsqueeze(-1).unsqueeze(-1) / (var_rescale.unsqueeze(-1).unsqueeze(-1) * 0.35)
+            x_norm = (x - mean) * cheb_result / (var_rescale * 0.35)
+
+        with torch.no_grad():
+            if self.training:
+                self.running_var_mean = (1 - exponential_average_factor) * self.running_var_mean + exponential_average_factor * self.saved_var_mean
 
         if self.elementwise_affine:
             x_norm = self.gain * x_norm + self.bias
