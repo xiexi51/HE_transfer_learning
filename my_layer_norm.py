@@ -63,6 +63,7 @@ class MyLayerNorm(Module):
         self.var_norm_boundary = 3
 
         self.group_size = 64
+        self.group_num = 1
         self.momentum = None
 
         self.filter_var_mean = False
@@ -134,7 +135,8 @@ class MyLayerNorm(Module):
         
         if not hasattr(self, 'running_var_mean'):
             if self.group_size > 0:
-                self.register_buffer('running_var_mean', torch.ones(x.shape[1] // self.group_size))
+                self.group_num = x.shape[1] // self.group_size
+                self.register_buffer('running_var_mean', torch.ones(self.group_num))
             else:
                 self.register_buffer('running_var_mean', torch.ones(1))
             # Create parameters for $\gamma$ and $\beta$ for gain and bias
