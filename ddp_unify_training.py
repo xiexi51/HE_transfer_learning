@@ -202,7 +202,8 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
             continue
         
         if args.loss_var1_factor > 0 or args.loss_var2_factor > 0:
-            train_loss_var += loss_var.item()
+            if loss_var > 0:
+                train_loss_var += loss_var.item()
         if args.loss_conv_prune_factor > 0:
             train_loss_conv += loss_conv.item()
         if args.loss_fm_factor > 0:
