@@ -168,7 +168,7 @@ class MyLayerNorm(Module):
         exponential_average_factor = 0.0
 
         if self.training:
-            self.num_batches_tracked.data += 1
+            self.num_batches_tracked += 1
             exponential_average_factor = 1.0 / float(self.num_batches_tracked)
             if self.momentum is not None:
                 if exponential_average_factor < self.momentum:
@@ -271,7 +271,7 @@ class MyLayerNorm(Module):
 
             if self.training:
                 var_mask = var_normed > self.var_norm_boundary
-                cheb_result[var_mask] = 1.0 / torch.sqrt(var_normed[var_mask] + self.eps)
+                cheb_result[var_mask] = 0.35 / torch.sqrt(var_normed[var_mask] + self.eps)
 
             x_norm = (x - mean) * cheb_result / (var_rescale * 0.35)
 
