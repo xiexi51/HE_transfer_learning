@@ -189,7 +189,8 @@ def process(pn, args):
     if args.reload or args.resume:
         if checkpoint_path and os.path.exists(checkpoint_path):
             print(f"Loading checkpoint: {checkpoint_path}")
-            state_dict = torch.load(checkpoint_path)['model_state_dict']
+            checkpoint = torch.load(checkpoint_path)
+            state_dict = checkpoint['model_state_dict']
             # new_state_dict = {}
             # for key, value in state_dict.items():
             #     new_key = re.sub(r'layer(\d+)_(\d+)', r'layer\1.\2', key)
