@@ -203,7 +203,7 @@ def process(pn, args):
     if args.reload or args.resume:
         if checkpoint_path and os.path.exists(checkpoint_path):
             print(f"Loading checkpoint: {checkpoint_path}")
-            checkpoint = torch.load(checkpoint_path)
+            checkpoint = torch.load(checkpoint_path, map_location='cpu')
             state_dict = checkpoint['model_state_dict']
             # new_state_dict = {}
             # for key, value in state_dict.items():
