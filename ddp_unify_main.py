@@ -94,8 +94,8 @@ def process(pn, args):
                 module.setup(model_custom_settings)
                 last_mylayernorm = module
 
-        if last_mylayernorm is not None:
-            last_mylayernorm.norm_type = 'batchnorm'
+        # if last_mylayernorm is not None:
+        #     last_mylayernorm.norm_type = 'batchnorm'
 
     # elif args.v_type == "18":
     #     model = ResNet18AvgCustom(model_custom_settings, args.if_wide)
