@@ -54,7 +54,7 @@ def process(pn, args):
     torch.cuda.set_device(pn)
     process_group = torch.distributed.init_process_group(backend="nccl", init_method=f'tcp://{args.master_ip}:{args.master_port}', world_size=args.world_size, rank=world_pn)
 
-    distributed_print(world_pn, dist.get_world_size(), f"Process {world_pn} started")
+    # distributed_print(world_pn, dist.get_world_size(), f"Process {world_pn} started")
 
     torch.manual_seed(10)
     torch.cuda.manual_seed_all(10)
@@ -198,8 +198,6 @@ def process(pn, args):
             start_epoch = args.resume_epoch + 1
         checkpoint_path = os.path.join(args.resume_dir, f'checkpoint_epoch_{start_epoch - 1}.pth')
 
-    distributed_print(world_pn, dist.get_world_size(), f"Process {world_pn} loading")
-
     if args.reload or args.resume:
         if checkpoint_path and os.path.exists(checkpoint_path):
             print(f"Loading checkpoint: {checkpoint_path}")
@@ -334,8 +332,6 @@ def process(pn, args):
         assert checkpoint['epoch'] + 1 == start_epoch
         if args.resume_log_root:
             log_root = args.resume_dir    
-
-    distributed_print(world_pn, dist.get_world_size(), f"Process {world_pn} here")
 
     log_dir = log_root
     print("log_dir = ", log_dir)
