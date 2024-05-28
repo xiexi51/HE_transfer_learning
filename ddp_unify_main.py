@@ -77,6 +77,7 @@ def process(pn, args):
                                            args.ln_quad_coeffs, args.ln_quad_finetune_factors, args.ln_x_scaler, args.ln_group_size)
 
     print("v_type = ", args.v_type)
+    args.v_type = str(args.v_type)
     if args.v_type in ["5", "6", "7"]:
         if args.v_type == "6":
             vanillanet = vanillanet_6_full_unify
@@ -752,8 +753,9 @@ if __name__ == "__main__":
                 key, value = parse_args_line(line.strip())
                 if hasattr(args, key) and not key.startswith('resume') and not key.startswith('reload'):
                     if (not key.startswith('batch_size') and not key == 'lr' and not key.startswith('num_train_loader') 
-                        and not key.startswith('num_test_loader') and not key == 'total_epochs' and not key == 'master_port'
-                        and not key == 'keep_checkpoints' and not key == 'copy_to_a6000' and not key == 'log_root'):
+                        and not key.startswith('num_test_loader') and not key == 'total_epochs' and not key == 'master_ip'
+                        and not key == 'master_port' and not key == 'keep_checkpoints' and not key == 'copy_to_a6000' and not key == 'log_root'
+                        and not key == 'world_size' and not key == 'node_rank_begin' and not key == 'id'):
                         setattr(args, key, value)
 
     args.node_gpu_count = torch.cuda.device_count()
