@@ -95,13 +95,13 @@ class MyLayerNorm(Module):
         self.total_counts_train = None
         self.total_counts_test = None
 
-        self.epoch_train_var_mean = None
-        self.epoch_train_var_sum = None
-        self.epoch_train_var_mean_count = None
+        self.epoch_train_var_mean = 0
+        self.epoch_train_var_sum = 0
+        self.epoch_train_var_mean_count = 0
 
-        self.epoch_test_var_mean = None
-        self.epoch_test_var_sum = None
-        self.epoch_test_var_mean_count = None
+        self.epoch_test_var_mean = 0
+        self.epoch_test_var_sum = 0
+        self.epoch_test_var_mean_count = 0
 
         self.saved_var = None
 
@@ -132,6 +132,17 @@ class MyLayerNorm(Module):
 
         if self.normalized_shape is None:
             self.normalized_shape = x.size()[1:]
+
+        x *= self.ln_x_scaler
+
+        if self.norm_type == "layernorm":
+            if self.origin_norm is None:
+                self.origin_norm = nn.LayerNorm(self.normalized_shape, eps=self.eps, elementwise_affine=self.elementwise_affine)
+            return self.origin_norm(x)
+        elif self.norm_type == "batchnorm":
+            if self.origin_norm is None:
+                self.origin_norm = nn.BatchNorm2d(x.size()[1], eps=self.eps)
+            return self.origin_norm(x)
         
         if not hasattr(self, 'running_var_mean'):
             if self.group_size > 0:
@@ -144,26 +155,15 @@ class MyLayerNorm(Module):
                 self.gain = nn.Parameter(torch.ones(self.normalized_shape))
                 self.bias = nn.Parameter(torch.zeros(self.normalized_shape))
 
-        if self.epoch_train_var_mean is None:
-            self.epoch_train_var_mean = 0
-            self.epoch_train_var_sum = 0
-            self.epoch_train_var_mean_count = 0
+        # if self.epoch_train_var_mean is None:
+        #     self.epoch_train_var_mean = 0
+        #     self.epoch_train_var_sum = 0
+        #     self.epoch_train_var_mean_count = 0
         
-        if self.epoch_test_var_mean is None:
-            self.epoch_test_var_mean = 0
-            self.epoch_test_var_sum = 0
-            self.epoch_test_var_mean_count = 0
-
-        x *= self.ln_x_scaler
-
-        if self.norm_type == "layernorm":
-            if self.origin_norm is None:
-                self.origin_norm = nn.LayerNorm(self.normalized_shape, eps=self.eps, elementwise_affine=self.elementwise_affine)
-            return self.origin_norm(x)
-        elif self.norm_type == "batchnorm":
-            if self.origin_norm is None:
-                self.origin_norm = nn.BatchNorm2d(x.size()[1], eps=self.eps)
-            return self.origin_norm(x)
+        # if self.epoch_test_var_mean is None:
+        #     self.epoch_test_var_mean = 0
+        #     self.epoch_test_var_sum = 0
+        #     self.epoch_test_var_mean_count = 0        
 
         exponential_average_factor = 0.0
 

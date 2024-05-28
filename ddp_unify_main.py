@@ -85,12 +85,17 @@ def process(pn, args):
         else:
             vanillanet = vanillanet_5_full_unify
         model = vanillanet(model_custom_settings, args.vanilla_shortcut, args.vanilla_keep_bn)
+        last_mylayernorm = None
         _i = 0
         for module in model.modules():
             if isinstance(module, MyLayerNorm):
                 module.number = _i
                 _i += 1
                 module.setup(model_custom_settings)
+                last_mylayernorm = module
+
+        if last_mylayernorm is not None:
+            last_mylayernorm.norm_type = 'batchnorm'
 
     # elif args.v_type == "18":
     #     model = ResNet18AvgCustom(model_custom_settings, args.if_wide)
