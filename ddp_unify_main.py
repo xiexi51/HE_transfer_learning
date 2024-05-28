@@ -436,14 +436,14 @@ def process(pn, args):
         if threshold_end < args.threshold_min:
             threshold_end = args.threshold_min
 
-        if args.running_var_mean_epoch >= 0 and epoch == args.running_var_mean_epoch:
+        if args.running_var_mean_epoch >= 0 and epoch >= args.running_var_mean_epoch:
             args.loss_var1_factor = store_loss_var1_factor
             args.loss_var2_factor = store_loss_var2_factor
             for module in model.module.modules():
                 if isinstance(module, MyLayerNorm):
                     module.use_running_var_mean = True
         
-        if args.filter_var_mean_epoch >= 0 and epoch == args.filter_var_mean_epoch:
+        if args.filter_var_mean_epoch >= 0 and epoch >= args.filter_var_mean_epoch:
             for module in model.module.modules():
                 if isinstance(module, MyLayerNorm):
                     module.filter_var_mean = True
