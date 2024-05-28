@@ -40,6 +40,7 @@ def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
 def process(pn, args):
     setproctitle.setproctitle("ddp")
     world_pn = pn + args.node_rank_begin
+    print(world_pn)
     change_print_for_distributed(world_pn == 0)
     torch.cuda.set_device(pn)
     process_group = torch.distributed.init_process_group(backend="nccl", init_method=f'tcp://{args.master_ip}:{args.master_port}', world_size=args.world_size, rank=world_pn)
