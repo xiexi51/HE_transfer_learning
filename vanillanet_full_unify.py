@@ -19,7 +19,8 @@ class activation_unify(nn.ReLU):
         super().__init__()
         self.act_num = act_num
 
-        self.bn = MyLayerNorm()
+        # self.bn = MyLayerNorm()
+        self.bn = nn.BatchNorm2d(dim)
 
         self.conv = Conv2dPruned(custom_settings, in_channels=dim, out_channels=dim, kernel_size=(act_num * 2 + 1, act_num * 2 + 1), padding=act_num, groups=dim, bias=False)
 
