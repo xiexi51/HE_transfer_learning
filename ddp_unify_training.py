@@ -82,7 +82,7 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
             mask_current = mask[0] + mask_iter
         else:
             mask_iter = 0
-            mask_current = mask[1]
+            mask_current = mask[0]
     else:
         mask_iter = 0
         mask_current = 0
@@ -240,8 +240,6 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
         # assert math.isfinite(loss)
         
         scaler.scale(loss).backward(create_graph=hasattr(optimizer, 'is_second_order') and optimizer.is_second_order)
-
-
 
         accumulated_batches += 1
         train_loss += loss.item()

@@ -203,6 +203,7 @@ def process(pn, args):
             print(f"Loading checkpoint: {checkpoint_path}")
             checkpoint = torch.load(checkpoint_path, map_location='cpu')
             state_dict = checkpoint['model_state_dict']
+            new_state_dict = {k.replace('origin_norm.weight', 'gain') if k.endswith('origin_norm.weight') else k.replace('origin_norm.bias', 'bias') if k.endswith('origin_norm.bias') else k: v for k, v in state_dict.items()}
             # new_state_dict = {}
             # for key, value in state_dict.items():
             #     new_key = re.sub(r'layer(\d+)_(\d+)', r'layer\1.\2', key)
@@ -210,7 +211,7 @@ def process(pn, args):
             #     new_key = re.sub(r'(^relu)(\d+)\.', r'\1\2.relu.', new_key)
             #     new_state_dict[new_key] = value
             # model.load_state_dict(new_state_dict, strict=False)
-            model.load_state_dict(state_dict, strict=False)
+            model.load_state_dict(new_state_dict, strict=False)
         else:
             print(f"No checkpoint found at {checkpoint_path}")
 
@@ -374,7 +375,7 @@ def process(pn, args):
         max_accuracy_ema_epoch = 0
         best_ema_decay = args.model_ema_decay[0]
 
-    if False or (args.only_test and (args.reload or args.resume)):
+    if True or (args.only_test and (args.reload or args.resume)):
         if start_epoch == 0:
             _test_epoch = 0
         else:
@@ -385,10 +386,16 @@ def process(pn, args):
         # if world_pn == 0:            
         #     total_elements, relu_elements = model.module.get_relu_density(_mask)    
         #     print(f"total_elements {total_elements}, relu_elements {relu_elements}, relu density = {relu_elements/total_elements}")
+
+        for module in model.module.modules():
+            if isinstance(module, custom_relu):
+                module.mask = 1
+            if isinstance(module, MyLayerNorm):
+                module.mask = 1
         
         if True or args.world_size > 1:
             # ddp_test(args, testloader, model_t, _test_epoch, best_acc, -1, writer, pn)
-            ddp_test(args, testloader, model, _test_epoch, best_acc, 0, writer, pn, 1)
+            ddp_test(args, testloader, model, _test_epoch, best_acc, 1, writer, pn, 1)
 
             # if pn == 0:
             #     model.module.get_ln_statistics(0, f"{log_dir}/var.txt")
@@ -422,14 +429,25 @@ def process(pn, args):
     for epoch in range(start_epoch, args.total_epochs):
         if args.lr_step_size > 0:
             adjust_learning_rate(optimizer, epoch, args.lr, args.lr_step_size, args.lr_gamma)
+        
+        if epoch == 0:
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = args.lr * 0.01
+        elif epoch == 1:
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = args.lr
 
         train_sampler.set_epoch(epoch)
         mask = mask_provider.get_mask(epoch)
         mask_begin, mask_end = mask
 
+        print(mask)
+
         for module in model.module.modules():
             if isinstance(module, custom_relu):
-                module.mask = mask_end
+                module.mask = mask_begin
+            if isinstance(module, MyLayerNorm):
+                module.mask = mask_begin
 
         threshold = threshold_provider.get_mask(epoch)
         threshold_begin, threshold_end = threshold
@@ -446,7 +464,7 @@ def process(pn, args):
         if args.filter_var_mean_epoch >= 0 and epoch >= args.filter_var_mean_epoch:
             for module in model.module.modules():
                 if isinstance(module, MyLayerNorm):
-                    module.filter_var_mean = True
+                    module.filter_var_mean = args.filter_var_mean
 
         act_learn = 0
 
@@ -473,9 +491,9 @@ def process(pn, args):
         
         # print('avg_l2_norm = ', avg_l2_norm)
 
-        if True or mask_end < 0.01:
+        if True or mask_begin < 0.01:
             if mask is not None:
-                test_acc = ddp_test(args, testloader, model, epoch, best_acc, mask_end, writer, world_pn, threshold_end)
+                test_acc = ddp_test(args, testloader, model, epoch, best_acc, mask_begin, writer, world_pn, threshold_end)
             else:
                 test_acc = ddp_test(args, testloader, model, epoch, best_acc, None, writer, world_pn, threshold_end)
         
@@ -501,7 +519,7 @@ def process(pn, args):
             else:
                 active_conv_rate = 1
             with open(f"{log_dir}/acc.txt", 'a') as file:
-                file.write(f"{epoch} train {train_acc*100:.2f} test {test_acc*100:.2f} best {best_acc*100:.2f} Lr {optimizer.param_groups[0]['lr']:.2e} mask {mask_end:.4f} act_learn {act_learn:.2f} conv {active_conv_rate:.4f}\n")
+                file.write(f"{epoch} train {train_acc*100:.2f} test {test_acc*100:.2f} best {best_acc*100:.2f} Lr {optimizer.param_groups[0]['lr']:.2e} mask {mask_begin:.4f} act_learn {act_learn:.2f} conv {active_conv_rate:.4f}\n")
             writer.flush()
         
         if lr_scheduler is not None:
@@ -607,6 +625,7 @@ if __name__ == "__main__":
     parser.add_argument('--ln_x_scaler', type=float, default=0.2)
     parser.add_argument('--ln_group_size', type=int, default=64)
     parser.add_argument('--filter_var_mean_epoch', type=int, default=10)
+    parser.add_argument('--filter_var_mean', type=float, default=10)
 
     parser.add_argument('--loss_var1_factor', default=0, type=float)
     parser.add_argument('--loss_var2_factor', default=0, type=float)

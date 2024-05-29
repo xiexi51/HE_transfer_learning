@@ -66,8 +66,10 @@ class MyLayerNorm(Module):
         self.group_num = 1
         self.momentum = None
 
-        self.filter_var_mean = False
+        self.filter_var_mean = -1
         self.filter_var_mean_times = 0
+
+        self.mask = 0
 
         self.norm_type = "my_layernorm"
         self.origin_norm = None
@@ -208,8 +210,8 @@ class MyLayerNorm(Module):
             mean = mean.repeat_interleave(self.group_size, dim=1).unsqueeze(-1).unsqueeze(-1)
             var = var.repeat_interleave(self.group_size, dim=1).unsqueeze(-1).unsqueeze(-1)
 
-        if self.training and self.filter_var_mean:
-            if (var_mean > self.running_var_mean * 10).any():
+        if self.training and self.filter_var_mean > 0:
+            if (var_mean > self.running_var_mean * self.filter_var_mean).any():
                 self.filter_var_mean_times = 1
                 x_norm = (x - mean) / torch.sqrt(var + self.eps)
                 if self.elementwise_affine:
@@ -273,7 +275,7 @@ class MyLayerNorm(Module):
                 var_mask = var_normed > self.var_norm_boundary
                 cheb_result[var_mask] = 0.35 / torch.sqrt(var_normed[var_mask] + self.eps)
 
-            x_norm = (x - mean) * cheb_result / (var_rescale * 0.35)
+            x_norm = (x - mean) * (cheb_result / (var_rescale * 0.35) * (1 - self.mask) + 1 / torch.sqrt(var + self.eps) * self.mask)
 
         with torch.no_grad():
             if self.training:
