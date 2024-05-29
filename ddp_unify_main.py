@@ -381,7 +381,7 @@ def process(pn, args):
         else:
             _test_epoch = start_epoch - 1
 
-        _mask_begin, _mask_end = mask_provider.get_mask(0)
+        _mask_begin, _mask_end = mask_provider.get_mask(_test_epoch)
 
         # if world_pn == 0:            
         #     total_elements, relu_elements = model.module.get_relu_density(_mask)    
@@ -389,13 +389,13 @@ def process(pn, args):
 
         for module in model.module.modules():
             if isinstance(module, custom_relu):
-                module.mask = 1
+                module.mask = _mask_begin
             if isinstance(module, MyLayerNorm):
-                module.mask = 1
+                module.mask = _mask_begin
         
         if True or args.world_size > 1:
             # ddp_test(args, testloader, model_t, _test_epoch, best_acc, -1, writer, pn)
-            ddp_test(args, testloader, model, _test_epoch, best_acc, 1, writer, pn, 1)
+            ddp_test(args, testloader, model, _test_epoch, best_acc, _mask_begin, writer, pn, 1)
 
             # if pn == 0:
             #     model.module.get_ln_statistics(0, f"{log_dir}/var.txt")
