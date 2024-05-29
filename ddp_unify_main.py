@@ -787,7 +787,7 @@ if __name__ == "__main__":
                     if (not key.startswith('batch_size') and not key == 'lr' and not key.startswith('num_train_loader') 
                         and not key.startswith('num_test_loader') and not key == 'total_epochs' and not key == 'master_ip'
                         and not key == 'master_port' and not key == 'keep_checkpoints' and not key == 'copy_to_a6000' and not key == 'log_root'
-                        and not key == 'world_size' and not key == 'node_rank_begin' and not key == 'id'):
+                        and not key == 'world_size' and not key == 'node_rank_begin' and not key == 'id' and not key == 'only_test'):
                         setattr(args, key, value)
 
     args.node_gpu_count = torch.cuda.device_count()
