@@ -38,8 +38,8 @@ class star_relu(nn.Module):
     def __init__(self, num_channels):
         super().__init__()
         self.num_channels = num_channels
-        self.linear1 = nn.Linear(num_channels, 6 * num_channels)
-        self.linear2 = nn.Linear(3 * num_channels, num_channels)
+        self.linear1 = nn.Linear(num_channels, 4 * num_channels)
+        self.linear2 = nn.Linear(2 * num_channels, num_channels)
     
     def forward(self, x):
         assert len(x.shape) == 4, "Input must have 4 dimensions (B, C, H, W)"
@@ -47,7 +47,7 @@ class star_relu(nn.Module):
         x = self.linear1(x)  # Pass through linear1
         B, H, W, C = x.size()
         x1, x2 = x.reshape(B, H, W, 2, int(C // 2)).unbind(3)
-        x = 0.01 * x1 * x2  # Dot product
+        x = 0.0001 * x1 * x2  # Dot product
         x = self.linear2(x)  # Pass through linear2
         x = x.permute(0, 3, 1, 2)  # Move C back to its original position
         return x
