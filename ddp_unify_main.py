@@ -375,7 +375,7 @@ def process(pn, args):
         max_accuracy_ema_epoch = 0
         best_ema_decay = args.model_ema_decay[0]
 
-    if True or (args.only_test and (args.reload or args.resume)):
+    if False or (args.only_test and (args.reload or args.resume)):
         if start_epoch == 0:
             _test_epoch = 0
         else:
