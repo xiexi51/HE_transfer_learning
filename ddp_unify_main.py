@@ -430,12 +430,12 @@ def process(pn, args):
         if args.lr_step_size > 0:
             adjust_learning_rate(optimizer, epoch, args.lr, args.lr_step_size, args.lr_gamma)
         
-        # if epoch == 0:
-        #     for param_group in optimizer.param_groups:
-        #         param_group['lr'] = args.lr * 0.01
-        # elif epoch == 1:
-        #     for param_group in optimizer.param_groups:
-        #         param_group['lr'] = args.lr
+        if epoch == 0:
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = args.lr * args.first_epoch_lr_factor
+        elif epoch == 1:
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = args.lr
 
         train_sampler.set_epoch(epoch)
         mask = mask_provider.get_mask(epoch)
@@ -626,6 +626,8 @@ if __name__ == "__main__":
     parser.add_argument('--ln_group_size', type=int, default=64)
     parser.add_argument('--filter_var_mean_epoch', type=int, default=10)
     parser.add_argument('--filter_var_mean', type=float, default=10)
+
+    parser.add_argument('--first_epoch_lr_factor', type=float, default=0.01)
 
     parser.add_argument('--loss_var1_factor', default=0, type=float)
     parser.add_argument('--loss_var2_factor', default=0, type=float)
