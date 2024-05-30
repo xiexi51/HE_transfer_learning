@@ -430,12 +430,12 @@ def process(pn, args):
         if args.lr_step_size > 0:
             adjust_learning_rate(optimizer, epoch, args.lr, args.lr_step_size, args.lr_gamma)
         
-        if epoch == 0:
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = args.lr * 0.01
-        elif epoch == 1:
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = args.lr
+        # if epoch == 0:
+        #     for param_group in optimizer.param_groups:
+        #         param_group['lr'] = args.lr * 0.01
+        # elif epoch == 1:
+        #     for param_group in optimizer.param_groups:
+        #         param_group['lr'] = args.lr
 
         train_sampler.set_epoch(epoch)
         mask = mask_provider.get_mask(epoch)
