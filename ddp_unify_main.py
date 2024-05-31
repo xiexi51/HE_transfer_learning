@@ -31,6 +31,7 @@ from demonet import DemoNet
 from utils import CustomSettings
 from my_layer_norm import MyLayerNorm, get_ln_statistics
 from resnet import ResNet18, ResNet34, ResNet50
+from vgg import my_vgg19
 
 def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
     lr = init_lr * (lr_gamma ** (epoch // lr_step_size))
@@ -46,6 +47,23 @@ def distributed_print(rank, world_size, message):
     if rank == 0:
         for rank_idx, msg in enumerate(messages):
             print(f"Rank {rank_idx}: {msg}")
+
+def replace_modules(model, model_custom_settings, i=0):
+    for name, module in model.named_children():
+        if len(list(module.children())) > 0:
+            i = replace_modules(module, model_custom_settings, i)
+        else:
+            if isinstance(module, torch.nn.MaxPool2d):
+                setattr(model, name, torch.nn.AvgPool2d(module.kernel_size, module.stride, module.padding))
+            if isinstance(module, torch.nn.ReLU):
+                setattr(model, name, custom_relu(model_custom_settings))
+            if isinstance(module, torch.nn.BatchNorm2d):
+                my_layer_norm = MyLayerNorm()
+                my_layer_norm.number = i
+                my_layer_norm.setup(model_custom_settings)
+                setattr(model, name, my_layer_norm)
+                i += 1
+    return i
 
 def process(pn, args):
     setproctitle.setproctitle("ddp")
@@ -121,28 +139,15 @@ def process(pn, args):
         else:
             model = ResNet50()
 
-        def replace_modules(model, model_custom_settings, i=0):
-            for name, module in model.named_children():
-                if len(list(module.children())) > 0:
-                    i = replace_modules(module, model_custom_settings, i)
-                else:
-                    if isinstance(module, torch.nn.MaxPool2d):
-                        setattr(model, name, torch.nn.AvgPool2d(module.kernel_size, module.stride, module.padding))
-                    if isinstance(module, torch.nn.ReLU):
-                        setattr(model, name, custom_relu(model_custom_settings))
-                    if isinstance(module, torch.nn.BatchNorm2d):
-                        my_layer_norm = MyLayerNorm()
-                        my_layer_norm.number = i
-                        my_layer_norm.setup(model_custom_settings)
-                        setattr(model, name, my_layer_norm)
-                        i += 1
-            return i
-
         replace_modules(model, model_custom_settings)
 
         initialize_resnet(model)
 
         # model.load_state_dict(models.resnet34(weights=models.resnet.ResNet34_Weights.DEFAULT).state_dict(), strict=True)
+    
+    elif args.v_type in ["v19"]:
+        model = my_vgg19(pretrained=False)
+        replace_modules(model, model_custom_settings)
 
     else:
         model = DemoNet(depth=10, dim=224, mode="mul")
@@ -171,11 +176,11 @@ def process(pn, args):
     else:
         model_t = None
     
-    if args.v_type != "demo":
+    if args.v_type != "demo" :
         dummy_input = torch.rand(10, 3, 224, 224)
         model.eval()
-        model((dummy_input, 0, 1))
-        # model(dummy_input)
+        # model((dummy_input, 0, 1))
+        model(dummy_input)
 
     checkpoint = None
 
@@ -203,7 +208,10 @@ def process(pn, args):
             print(f"Loading checkpoint: {checkpoint_path}")
             checkpoint = torch.load(checkpoint_path, map_location='cpu')
             state_dict = checkpoint['model_state_dict']
-            new_state_dict = {k.replace('origin_norm.weight', 'gain') if k.endswith('origin_norm.weight') else k.replace('origin_norm.bias', 'bias') if k.endswith('origin_norm.bias') else k: v for k, v in state_dict.items()}
+            if model_custom_settings.norm_type == "my_layernorm":
+                new_state_dict = {k.replace('origin_norm.weight', 'gain') if k.endswith('origin_norm.weight') else k.replace('origin_norm.bias', 'bias') if k.endswith('origin_norm.bias') else k: v for k, v in state_dict.items()}
+            else:
+                new_state_dict = state_dict
             # new_state_dict = {}
             # for key, value in state_dict.items():
             #     new_key = re.sub(r'layer(\d+)_(\d+)', r'layer\1.\2', key)
@@ -610,7 +618,7 @@ if __name__ == "__main__":
     parser.add_argument('--act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix', 'star'])
     parser.add_argument('--teacher_act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix', 'star'])
 
-    parser.add_argument('--v_type', type=str, default="18", choices = ["5", "6", "7", "18", "34", "50", "demo"])
+    parser.add_argument('--v_type', type=str, default="18", choices = ["5", "6", "7", "18", "34", "50", "demo", "v19"])
     parser.add_argument('--old_version', type=ast.literal_eval, default=False)
 
     parser.add_argument('--cheb_params', nargs=3, type=float, default=[4, 0.1, 5], help='degree, a, b')

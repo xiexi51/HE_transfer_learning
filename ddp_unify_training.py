@@ -303,7 +303,7 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, world_pn, t
         
         with torch.cuda.amp.autocast(enabled=args.use_amp, dtype=amp_dtype):
             with torch.no_grad():
-                if args.v_type != "demo" and args.v_type.isdigit() and not int(args.v_type) >= 18:
+                if args.v_type != "demo" and args.v_type != "v19" and args.v_type.isdigit() and not int(args.v_type) >= 18:
                     set_forward_with_fms(model, False)
                     if mask is not None:
                         out, _ = model((x, mask, threshold))
