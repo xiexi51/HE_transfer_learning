@@ -12,6 +12,7 @@ class custom_relu(nn.Module):
         self.custom_settings = custom_settings
         self.relu = None
         self.mask = 0
+        self.dropout = nn.Dropout2d(custom_settings.relu_dropout) if custom_settings.relu_dropout > 0 else None
     
     def forward(self, x):
         if self.relu is None:
@@ -30,6 +31,10 @@ class custom_relu(nn.Module):
             x = self.relu(x)
         else:
             x = self.relu(x, self.mask)
+        
+        if self.dropout is not None:
+            x = self.dropout(x)
+
         return x
 
     def get_relu_density(self):

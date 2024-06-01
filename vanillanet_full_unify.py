@@ -101,6 +101,7 @@ class BlockAvgPoly(nn.Module):
         self.relu.mask = mask
         
         out = self.relu(out)
+        
 
         fms.append(out)
         
