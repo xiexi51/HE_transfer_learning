@@ -1,7 +1,14 @@
 import os
 import shutil
 
-base_dir = "../from_azure"
+# Define a function to get folder size
+def get_folder_size(folder):
+    total = 0
+    for path, dirs, files in os.walk(folder):
+        for f in files:
+            fp = os.path.join(path, f)
+            total += os.path.getsize(fp)
+    return total / 1e6  # return size in MB
 
 # Define a function to find and read the acc.txt file in a specific folder
 def find_max_test_acc_in_folder(folder):
@@ -23,26 +30,29 @@ def find_max_test_acc_in_folder(folder):
             return max_test_acc
     return None  # If the file does not exist or no valid test accuracy is found
 
-results = []
-
-# Traverse all folders in the base directory, find folders starting with 'runs'
-for folder in os.listdir(base_dir):
-    if os.path.isdir(os.path.join(base_dir, folder)) and folder.startswith('runs'):
-        max_test_acc = find_max_test_acc_in_folder(os.path.join(base_dir, folder))
+folders_info = []
+# Traverse all folders in the current directory, find folders starting with 'runs'
+for folder in os.listdir('.'):
+    if os.path.isdir(folder) and folder.startswith('runs'):
+        max_test_acc = find_max_test_acc_in_folder(folder)
         if max_test_acc is not None:
-            results.append((folder, max_test_acc))
+            size = get_folder_size(folder)
+            folders_info.append((folder, max_test_acc, size))
 
-# Sort the results by max_test_acc from high to low
-results.sort(key=lambda x: x[1], reverse=True)
+# Sort the folders by name
+folders_info.sort()
 
-# Print the sorted results
-for folder, max_test_acc in results:
-    print(f"{folder}: {max_test_acc}")
+# Print the folders info
+for folder, max_test_acc, size in folders_info:
+    print(f"{folder}: acc {max_test_acc}, size {size:.2f}MB")
 
-# Ask the user if they want to delete folders with max_test_acc < 10
-delete = input("Do you want to delete folders with max_test_acc < 10? (yes/no): ")
-if delete.lower() == "yes":
-    for folder, max_test_acc in results:
-        if max_test_acc < 10:
-            shutil.rmtree(os.path.join(base_dir, folder))
-            print(f"Deleted {folder}")
+# Ask the user if they want to remove folders
+remove_size = 5000
+remove_acc = 60
+
+response = input(f"Do you want to remove folders with max_test_acc < {remove_acc} and size < {remove_size}MB? (yes/no) ")
+if response.lower() == 'yes':
+    for folder, max_test_acc, size in folders_info:
+        if max_test_acc < remove_acc and size < remove_size:
+            shutil.rmtree(folder)
+            print(f"Folder {folder} removed.")
