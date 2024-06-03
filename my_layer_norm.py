@@ -257,11 +257,11 @@ class MyLayerNorm(Module):
             x_norm = (x - mean) / torch.sqrt(var + self.eps)
         else:
             if self.training and not self.use_running_var_mean:
-                var_normed = var / var_mean
-                var_rescale = torch.sqrt(var_mean)
+                var_normed = 2 * var / var_mean
+                var_rescale = torch.sqrt(0.5 * var_mean)
             else:
-                var_normed = var / _running_var_mean
-                var_rescale = torch.sqrt(_running_var_mean)
+                var_normed = 2 * var / _running_var_mean
+                var_rescale = torch.sqrt(0.5 * _running_var_mean)
             
             if self.use_quad:
                 _a = self.quad_coeffs[0] + self.quad_finetune_param[0] * self.quad_finetune_factors[0]
@@ -273,9 +273,9 @@ class MyLayerNorm(Module):
 
             if self.training:
                 var_mask = var_normed > self.var_norm_boundary
-                cheb_result[var_mask] = 0.35 / torch.sqrt(var_normed[var_mask] + self.eps)
+                cheb_result[var_mask] = 1 / torch.sqrt(var_normed[var_mask] + self.eps)
 
-            x_norm = (x - mean) * (cheb_result / (var_rescale * 0.35) * (1 - self.mask) + 1 / torch.sqrt(var + self.eps) * self.mask)
+            x_norm = (x - mean) * (cheb_result / var_rescale * (1 - self.mask) + 1 / torch.sqrt(var + self.eps) * self.mask)
 
         with torch.no_grad():
             if self.training:

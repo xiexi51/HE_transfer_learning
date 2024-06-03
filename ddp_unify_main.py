@@ -632,7 +632,7 @@ if __name__ == "__main__":
     parser.add_argument('--ln_momentum', type=float, default=None)
     parser.add_argument('--ln_use_quad', type=ast.literal_eval, default=True)
     parser.add_argument('--ln_trainable_quad_finetune', type=ast.literal_eval, default=False)
-    parser.add_argument('--ln_quad_coeffs', nargs=3, type=float, default=[0.03, 10, 0.2])
+    parser.add_argument('--ln_quad_coeffs', nargs=3, type=float, default=[0.01, 10, 0.07])
     parser.add_argument('--ln_quad_finetune_factors', nargs=3, type=float, default=[0.0001, 0.1, 0.001])
     parser.add_argument('--ln_x_scaler', type=float, default=0.2)
     parser.add_argument('--ln_group_size', type=int, default=64)
