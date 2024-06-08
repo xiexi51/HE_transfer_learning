@@ -105,7 +105,7 @@ def process(pn, args):
                                            args.prune_1_1_kernel, args.norm_type, args.cheb_params, args.training_use_cheb, 
                                            args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_trainable_quad_finetune,
                                            args.ln_quad_coeffs, args.ln_quad_finetune_factors, args.ln_x_scaler, args.ln_group_size, 
-                                           args.relu_dropout)
+                                           args.relu_dropout, args.drop_rate)
 
     print("v_type = ", args.v_type)
     args.v_type = str(args.v_type)
@@ -157,7 +157,7 @@ def process(pn, args):
                                              args.teacher_prune_1_1_kernel, args.teacher_norm_type, args.cheb_params, args.training_use_cheb, 
                                              args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_trainable_quad_finetune,
                                              args.ln_quad_coeffs, args.ln_quad_finetune_factors, args.ln_x_scaler, args.ln_group_size, 
-                                             args.relu_dropout)
+                                             args.relu_dropout, args.drop_rate)
 
     if args.teacher_file is not None:
         if args.v_type in ["5", "6", "7"]:

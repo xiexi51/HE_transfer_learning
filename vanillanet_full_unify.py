@@ -126,7 +126,7 @@ class VanillaNetFullUnify(nn.Module):
 
         self.keep_bn = keep_bn
         self.if_forward_with_fms = False
-        self.drop_rate = drop_rate
+        # self.drop_rate = drop_rate
 
         stride, padding = (4, 0) if not ada_pool else (3, 1)
         
@@ -152,7 +152,7 @@ class VanillaNetFullUnify(nn.Module):
         self.depth = len(strides)
 
         self.avgpool = nn.AdaptiveAvgPool2d((1,1))
-        # self.dropout = nn.Dropout(drop_rate)
+        self.dropout = nn.Dropout(custom_settings.drop_rate)
 
         self.linear = nn.Linear(dims[-1], num_classes)
 
@@ -190,6 +190,8 @@ class VanillaNetFullUnify(nn.Module):
         featuremap = x
 
         x = self.avgpool(x)
+
+        x = self.dropout(x)
 
         x = x.view(x.size(0), -1)
         x = self.linear(x)
