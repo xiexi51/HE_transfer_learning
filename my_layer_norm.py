@@ -62,6 +62,9 @@ class MyLayerNorm(Module):
         self.use_running_var_mean = False
         self.var_norm_boundary = 3
 
+        self.ln_x_scaler = 1
+        self.var_norm_scaler = 1
+
         self.group_size = 64
         self.group_num = 1
         self.momentum = None
@@ -115,6 +118,7 @@ class MyLayerNorm(Module):
         self.ln_momentum = custom_settings.ln_momentum
 
         self.ln_x_scaler = custom_settings.ln_x_scaler
+        self.var_norm_scaler = custom_settings.var_norm_scaler
 
         self.group_size = custom_settings.ln_group_size
 
@@ -257,11 +261,11 @@ class MyLayerNorm(Module):
             x_norm = (x - mean) / torch.sqrt(var + self.eps)
         else:
             if self.training and not self.use_running_var_mean:
-                var_normed = 2 * var / var_mean
-                var_rescale = torch.sqrt(0.5 * var_mean)
+                var_normed = self.var_norm_scaler * var / var_mean
+                var_rescale = torch.sqrt(var_mean / self.var_norm_scaler)
             else:
-                var_normed = 2 * var / _running_var_mean
-                var_rescale = torch.sqrt(0.5 * _running_var_mean)
+                var_normed = self.var_norm_scaler * var / _running_var_mean
+                var_rescale = torch.sqrt(_running_var_mean / self.var_norm_scaler)
             
             if self.use_quad:
                 _a = self.quad_coeffs[0] + self.quad_finetune_param[0] * self.quad_finetune_factors[0]

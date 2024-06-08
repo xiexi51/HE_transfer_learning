@@ -105,7 +105,7 @@ def process(pn, args):
                                            args.prune_1_1_kernel, args.norm_type, args.cheb_params, args.training_use_cheb, 
                                            args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_trainable_quad_finetune,
                                            args.ln_quad_coeffs, args.ln_quad_finetune_factors, args.ln_x_scaler, args.ln_group_size, 
-                                           args.relu_dropout, args.drop_rate)
+                                           args.relu_dropout, args.drop_rate, args.var_norm_scaler)
 
     print("v_type = ", args.v_type)
     args.v_type = str(args.v_type)
@@ -157,7 +157,7 @@ def process(pn, args):
                                              args.teacher_prune_1_1_kernel, args.teacher_norm_type, args.cheb_params, args.training_use_cheb, 
                                              args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_trainable_quad_finetune,
                                              args.ln_quad_coeffs, args.ln_quad_finetune_factors, args.ln_x_scaler, args.ln_group_size, 
-                                             args.relu_dropout, args.drop_rate)
+                                             args.relu_dropout, args.drop_rate, args.var_norm_scaler)
 
     if args.teacher_file is not None:
         if args.v_type in ["5", "6", "7"]:
@@ -639,6 +639,8 @@ if __name__ == "__main__":
     parser.add_argument('--filter_var_mean_epoch', type=int, default=10)
     parser.add_argument('--filter_var_mean', type=float, default=10)
     parser.add_argument('--relu_dropout', type=float, default=0.2)
+
+    parser.add_argument('--var_norm_scaler', type=float, default=1.5)
 
     parser.add_argument('--first_epoch_lr_factor', type=float, default=0.01)
 
