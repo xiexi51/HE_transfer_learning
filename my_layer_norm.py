@@ -147,7 +147,7 @@ class MyLayerNorm(Module):
             return self.origin_norm(x)
         elif self.norm_type == "batchnorm":
             if self.origin_norm is None:
-                self.origin_norm = nn.BatchNorm2d(x.size()[1], eps=self.eps)
+                self.origin_norm = nn.BatchNorm2d(x.size()[1], eps=self.eps, track_running_stats=False)
             return self.origin_norm(x)
         
         if not hasattr(self, 'running_var_mean'):
