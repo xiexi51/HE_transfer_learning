@@ -65,9 +65,9 @@ class MyLayerNorm(Module):
         self.ln_x_scaler = 1
         self.var_norm_scaler = 1
 
-        self.group_size = 64
+        self.ln_group_size = 64
         self.group_num = 1
-        self.momentum = None
+        self.ln_momentum = None
 
         self.filter_var_mean = -1
         self.filter_var_mean_times = 0
@@ -77,10 +77,10 @@ class MyLayerNorm(Module):
         self.norm_type = "my_layernorm"
         self.origin_norm = None
 
-        self.use_quad = True
-        self.trainable_quad_finetune = True
-        self.quad_coeffs = [0.03, 10, 0.2]
-        self.quad_finetune_factors = [0.0001, 0.1, 0.001]
+        self.ln_use_quad = True
+        self.ln_trainable_quad_finetune = True
+        self.ln_quad_coeffs = [0.03, 10, 0.2]
+        self.ln_quad_finetune_factors = [0.0001, 0.1, 0.001]
         self.quad_finetune_param = None
 
         self.register_buffer('num_batches_tracked', torch.zeros(1))
@@ -120,15 +120,15 @@ class MyLayerNorm(Module):
         self.ln_x_scaler = custom_settings.ln_x_scaler
         self.var_norm_scaler = custom_settings.var_norm_scaler
 
-        self.group_size = custom_settings.ln_group_size
+        self.ln_group_size = custom_settings.ln_group_size
 
         self.norm_type = custom_settings.norm_type
 
-        self.use_quad = custom_settings.ln_use_quad
-        self.trainable_quad_finetune = custom_settings.ln_trainable_quad_finetune
-        self.quad_coeffs = custom_settings.ln_quad_coeffs
-        self.quad_finetune_factors = custom_settings.ln_quad_finetune_factors
-        if self.trainable_quad_finetune:
+        self.ln_use_quad = custom_settings.ln_use_quad
+        self.ln_trainable_quad_finetune = custom_settings.ln_trainable_quad_finetune
+        self.ln_quad_coeffs = custom_settings.ln_quad_coeffs
+        self.ln_quad_finetune_factors = custom_settings.ln_quad_finetune_factors
+        if self.ln_trainable_quad_finetune:
             self.quad_finetune_param = nn.Parameter(torch.zeros(3), requires_grad=True)
         else:
             self.quad_finetune_param = nn.Parameter(torch.zeros(3), requires_grad=False)
@@ -151,8 +151,8 @@ class MyLayerNorm(Module):
             return self.origin_norm(x)
         
         if not hasattr(self, 'running_var_mean'):
-            if self.group_size > 0:
-                self.group_num = x.shape[1] // self.group_size
+            if self.ln_group_size > 0:
+                self.group_num = x.shape[1] // self.ln_group_size
                 self.register_buffer('running_var_mean', torch.ones(self.group_num))
             else:
                 self.register_buffer('running_var_mean', torch.ones(1))
@@ -176,15 +176,15 @@ class MyLayerNorm(Module):
         if self.training:
             self.num_batches_tracked += 1
             exponential_average_factor = 1.0 / float(self.num_batches_tracked)
-            if self.momentum is not None:
-                if exponential_average_factor < self.momentum:
-                    exponential_average_factor = self.momentum
+            if self.ln_momentum is not None:
+                if exponential_average_factor < self.ln_momentum:
+                    exponential_average_factor = self.ln_momentum
 
         dims = [-(i + 1) for i in range(len(self.normalized_shape))]
 
-        if self.group_size > 0:
-            assert x.shape[1] % self.group_size == 0, f"Number of channels must be divisible by {self.group_size}."
-            x_grouped = x.view(x.shape[0], -1, self.group_size, *x.shape[2:])
+        if self.ln_group_size > 0:
+            assert x.shape[1] % self.ln_group_size == 0, f"Number of channels must be divisible by {self.ln_group_size}."
+            x_grouped = x.view(x.shape[0], -1, self.ln_group_size, *x.shape[2:])
             mean = x_grouped.mean(dim=dims, keepdim=False)
             mean_x2 = (x_grouped ** 2).mean(dim=dims, keepdim=False)
         else:
@@ -210,9 +210,9 @@ class MyLayerNorm(Module):
         # else:
         #     mask = torch.ones(var_mean.shape, dtype=torch.bool, device=var_mean.device)
         
-        if self.group_size > 0:
-            mean = mean.repeat_interleave(self.group_size, dim=1).unsqueeze(-1).unsqueeze(-1)
-            var = var.repeat_interleave(self.group_size, dim=1).unsqueeze(-1).unsqueeze(-1)
+        if self.ln_group_size > 0:
+            mean = mean.repeat_interleave(self.ln_group_size, dim=1).unsqueeze(-1).unsqueeze(-1)
+            var = var.repeat_interleave(self.ln_group_size, dim=1).unsqueeze(-1).unsqueeze(-1)
 
         if self.training and self.filter_var_mean > 0:
             if (var_mean > self.running_var_mean * self.filter_var_mean).any():
@@ -233,9 +233,9 @@ class MyLayerNorm(Module):
             self.epoch_test_var_sum += 0
             self.epoch_test_var_mean_count += 1    
 
-        if self.group_size > 0:
-            var_mean = var_mean.repeat_interleave(self.group_size).unsqueeze(-1).unsqueeze(-1)
-            _running_var_mean = self.running_var_mean.repeat_interleave(self.group_size).unsqueeze(-1).unsqueeze(-1)
+        if self.ln_group_size > 0:
+            var_mean = var_mean.repeat_interleave(self.ln_group_size).unsqueeze(-1).unsqueeze(-1)
+            _running_var_mean = self.running_var_mean.repeat_interleave(self.ln_group_size).unsqueeze(-1).unsqueeze(-1)
         else:
             _running_var_mean = self.running_var_mean
         
@@ -267,10 +267,10 @@ class MyLayerNorm(Module):
                 var_normed = self.var_norm_scaler * var / _running_var_mean
                 var_rescale = torch.sqrt(_running_var_mean / self.var_norm_scaler)
             
-            if self.use_quad:
-                _a = self.quad_coeffs[0] + self.quad_finetune_param[0] * self.quad_finetune_factors[0]
-                _b = self.quad_coeffs[1] + self.quad_finetune_param[1] * self.quad_finetune_factors[1]
-                _c = self.quad_coeffs[2] + self.quad_finetune_param[2] * self.quad_finetune_factors[2]
+            if self.ln_use_quad:
+                _a = self.ln_quad_coeffs[0] + self.quad_finetune_param[0] * self.ln_quad_finetune_factors[0]
+                _b = self.ln_quad_coeffs[1] + self.quad_finetune_param[1] * self.ln_quad_finetune_factors[1]
+                _c = self.ln_quad_coeffs[2] + self.quad_finetune_param[2] * self.ln_quad_finetune_factors[2]
                 cheb_result = _a * (var_normed - _b) ** 2 + _c
             else:
                 cheb_result = self.cheb.calculate(var_normed + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
