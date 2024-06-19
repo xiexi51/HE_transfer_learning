@@ -30,6 +30,7 @@ from torchvision import models
 from demonet import DemoNet
 from utils import CustomSettings
 from my_layer_norm import MyLayerNorm, get_ln_statistics
+from model_poly_avg import get_act_statistics
 from resnet import ResNet18, ResNet34, ResNet50
 from vgg import my_vgg19
 
@@ -93,13 +94,19 @@ def process(pn, args):
     testloader = torch.utils.data.DataLoader(testset, sampler=test_sampler, batch_size=args.batch_size_test, num_workers=args.num_test_loader_workers, pin_memory=True, shuffle=False, drop_last=False)
     single_testloader = torch.utils.data.DataLoader(testset, sampler=single_test_sampler, batch_size=args.batch_size_test, num_workers=args.num_test_loader_workers, drop_last=False)
 
+    if args.dataset == "cifar10":
+        num_classes = 10
+    else:
+        num_classes = 1000
+
+
     mixup_fn = None
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
     if mixup_active:
         mixup_fn = Mixup(
             mixup_alpha=args.mixup, cutmix_alpha=args.cutmix, cutmix_minmax=args.cutmix_minmax,
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
-            label_smoothing=args.smoothing, num_classes=1000 )
+            label_smoothing=args.smoothing, num_classes=num_classes)
         
     model_custom_settings = CustomSettings(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, 
                                            args.prune_1_1_kernel, args.norm_type, args.cheb_params, args.training_use_cheb, 
@@ -116,7 +123,7 @@ def process(pn, args):
             vanillanet = vanillanet_7_full_unify
         else:
             vanillanet = vanillanet_5_full_unify
-        model = vanillanet(model_custom_settings, args.vanilla_shortcut, args.vanilla_keep_bn)
+        model = vanillanet(model_custom_settings, num_classes, args.vanilla_shortcut, args.vanilla_keep_bn)
         last_mylayernorm = None
         _i = 0
         for module in model.modules():
@@ -134,11 +141,11 @@ def process(pn, args):
     #     initialize_resnet(model)
     elif args.v_type in ["18", "34", "50"]:
         if args.v_type == "18":
-            model = ResNet18()
+            model = ResNet18(num_classes)
         elif args.v_type == "34":
-            model = ResNet34()
+            model = ResNet34(num_classes)
         else:
-            model = ResNet50()
+            model = ResNet50(num_classes)
 
         replace_modules(model, model_custom_settings)
 
@@ -181,7 +188,7 @@ def process(pn, args):
     if args.v_type != "demo" :
         dummy_input = torch.rand(10, 3, 224, 224)
         model.eval()
-        if args.v_type == "v19":
+        if args.v_type == "v19" or args.v_type == "18":
             model(dummy_input)
         else:
             model((dummy_input, 0, 1))
@@ -268,11 +275,6 @@ def process(pn, args):
             for name, param in layer.named_parameters():
                 if not name.endswith("rand_mask"):
                     param.requires_grad = True
-
-    # if args.v_type != "demo":
-    #     linear_features = model.linear.in_features
-    #     if args.dataset == "cifar10":
-    #         model.linear = torch.nn.Linear(linear_features, 10)
 
     if args.loss_conv_prune_factor == 0:
         for name, module in model.named_modules():
@@ -458,6 +460,7 @@ def process(pn, args):
         for module in model.module.modules():
             if isinstance(module, custom_relu):
                 module.mask = mask_begin
+                module.reset_stats()
             if isinstance(module, MyLayerNorm):
                 module.mask = mask_begin
 
@@ -503,6 +506,9 @@ def process(pn, args):
         
         # print('avg_l2_norm = ', avg_l2_norm)
 
+        if pn == 0:
+            get_act_statistics(model.module, epoch, f"{log_dir}/act_stats.txt")
+
         if True or mask_begin < 0.01:
             if mask is not None:
                 test_acc = ddp_test(args, testloader, model, epoch, best_acc, mask_begin, writer, world_pn, threshold_end)
@@ -511,6 +517,8 @@ def process(pn, args):
         
         if pn == 0:
             get_ln_statistics(model.module, epoch, f"{log_dir}/var.txt")
+            get_act_statistics(model.module, epoch, f"{log_dir}/act_stats.txt")
+            
 
         for layer in model.module.modules():
             if isinstance(layer, MyLayerNorm):

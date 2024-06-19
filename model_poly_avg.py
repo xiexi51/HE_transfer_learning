@@ -5,6 +5,7 @@ from model import fix_relu_poly, general_relu_poly, star_relu
 from utils import STEFunction
 from my_layer_norm import MyLayerNorm
 from utils import CustomSettings
+import numpy as np
     
 class custom_relu(nn.Module):
     def __init__(self, custom_settings):
@@ -13,8 +14,34 @@ class custom_relu(nn.Module):
         self.relu = None
         self.mask = 0
         self.dropout = nn.Dropout2d(custom_settings.relu_dropout) if custom_settings.relu_dropout > 0 else None
+        # self.saved_input_mean = None
+        # self.saved_input_var = None
+        # self.saved_output_mean = None
+        # self.saved_output_var = None
+
+        self.avg_times = 0
+        self.avg_input_mean = 0
+        self.avg_input_var = 0
+        self.avg_output_mean = 0
+        self.avg_output_var = 0
+        self.input_vars = []
+
+    def reset_stats(self):
+        self.avg_times = 0
+        self.avg_input_mean = 0
+        self.avg_input_var = 0
+        self.avg_output_mean = 0
+        self.avg_output_var = 0
+        self.input_vars = []
     
     def forward(self, x):
+        # self.saved_input_mean = x.mean()
+        # self.saved_input_var = x.var()
+        self.avg_times += 1
+        self.avg_input_mean += x.mean().item()
+        self.avg_input_var += x.var().item()
+        self.input_vars.append(x.var().item())
+
         if self.relu is None:
             num_channels = x.shape[1]
             if self.custom_settings.relu_type == "channel":
@@ -35,10 +62,33 @@ class custom_relu(nn.Module):
         if self.dropout is not None:
             x = self.dropout(x)
 
+        # self.saved_output_mean = x.mean()
+        # self.saved_output_var = x.var()
+
+        self.avg_output_mean += x.mean().item()
+        self.avg_output_var += x.var().item()
+
         return x
 
     def get_relu_density(self):
         return self.relu.get_relu_density(self.mask)
+
+def get_act_statistics(model, epoch, log_file):
+    with open(log_file, "a") as f:
+        f.write(f"Epoch: {epoch}\n")
+        for layer in model.modules():
+            if isinstance(layer, custom_relu):
+                if layer.avg_times > 0:
+                    avg_input_mean = layer.avg_input_mean / layer.avg_times
+                    avg_input_var = layer.avg_input_var / layer.avg_times
+
+                    input_vars_np = np.array(layer.input_vars)
+                    q1 = np.percentile(input_vars_np, 25)
+                    median = np.percentile(input_vars_np, 50)
+                    q3 = np.percentile(input_vars_np, 75)
+
+                    f.write(f"Layer: {layer.custom_settings.relu_type} avg_input_mean: {avg_input_mean:.2f} avg_input_var: {avg_input_var:.2f} median_input_var: {median:.2f} q1_input_var: {q1:.2f} q3_input_var: {q3:.2f}\n")
+                    layer.reset_stats()
 
 class Conv2dPruned(nn.Conv2d):
     def __init__(self, custom_settings, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):

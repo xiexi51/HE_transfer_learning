@@ -120,7 +120,7 @@ class BlockAvgPoly(nn.Module):
         return out, fms
 
 class VanillaNetFullUnify(nn.Module):
-    def __init__(self, custom_settings, in_chans=3, num_classes=1000, dims=[96, 192, 384, 768], 
+    def __init__(self, custom_settings, num_classes, in_chans=3, dims=[96, 192, 384, 768], 
                  drop_rate=0, act_num=3, strides=[2,2,2,1], ada_pool=None, if_shortcut=True, keep_bn=False, **kwargs):
         super().__init__()
 
@@ -245,18 +245,18 @@ class VanillaNetFullUnify(nn.Module):
 
 
 @register_model
-def vanillanet_5_full_unify(custom_settings, if_shortcut, keep_bn, **kwargs):
-    model = VanillaNetFullUnify(custom_settings, dims=[128*4, 256*4, 512*4, 1024*4], strides=[2,2,2], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
+def vanillanet_5_full_unify(custom_settings, num_classes, if_shortcut, keep_bn, **kwargs):
+    model = VanillaNetFullUnify(custom_settings, num_classes, dims=[128*4, 256*4, 512*4, 1024*4], strides=[2,2,2], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
     return model
 
 @register_model
-def vanillanet_6_full_unify(custom_settings, if_shortcut, keep_bn, **kwargs):
-    model = VanillaNetFullUnify(custom_settings, dims=[128*4, 256*4, 512*4, 1024*4, 1024*4], strides=[2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
+def vanillanet_6_full_unify(custom_settings, num_classes, if_shortcut, keep_bn, **kwargs):
+    model = VanillaNetFullUnify(custom_settings, num_classes, dims=[128*4, 256*4, 512*4, 1024*4, 1024*4], strides=[2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
     return model
 
 @register_model
-def vanillanet_7_full_unify(custom_settings, if_shortcut, keep_bn, **kwargs):
-    model = VanillaNetFullUnify(custom_settings, dims=[128*4, 128*4, 256*4, 512*4, 1024*4, 1024*4], strides=[1,2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
+def vanillanet_7_full_unify(custom_settings, num_classes, if_shortcut, keep_bn, **kwargs):
+    model = VanillaNetFullUnify(custom_settings, num_classes, dims=[128*4, 128*4, 256*4, 512*4, 1024*4, 1024*4], strides=[1,2,2,2,1], if_shortcut=if_shortcut, keep_bn=keep_bn, **kwargs)
     return model
 
 # @register_model
