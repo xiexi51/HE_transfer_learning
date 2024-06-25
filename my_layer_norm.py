@@ -108,6 +108,8 @@ class MyLayerNorm(Module):
         self.epoch_test_var_sum = 0
         self.epoch_test_var_mean_count = 0
 
+        self.cumulative_train_counts = None
+
         self.saved_var = None
 
     def setup(self, custom_settings: CustomSettings):
@@ -142,10 +144,34 @@ class MyLayerNorm(Module):
         x *= self.ln_x_scaler
 
         if self.norm_type == "layernorm":
+            if self.training:
+                mean = x.mean(dim=[1,2,3])
+                mean_x2 = (x ** 2).mean(dim=[1,2,3])
+                var = mean_x2 - mean ** 2
+                x_norm = (x - mean.view(-1, 1, 1, 1)) / torch.sqrt(var.view(-1, 1, 1, 1) + self.eps)
+                train_counts = torch.histc(x_norm, bins=10, min=-5, max=5)
+
+                if self.cumulative_train_counts is None:
+                    self.cumulative_train_counts = train_counts.detach().cpu().numpy()
+                else:
+                    self.cumulative_train_counts += train_counts.detach().cpu().numpy()
+
             if self.origin_norm is None:
                 self.origin_norm = nn.LayerNorm(self.normalized_shape, eps=self.eps, elementwise_affine=self.elementwise_affine)
             return self.origin_norm(x)
         elif self.norm_type == "batchnorm":
+            if self.training:
+                mean = x.mean(dim=[0,2,3])
+                mean_x2 = (x ** 2).mean(dim=[0,2,3])
+                var = mean_x2 - mean ** 2
+                x_norm = (x - mean.view(1, -1, 1, 1)) / torch.sqrt(var.view(1, -1, 1, 1) + self.eps)
+                train_counts = torch.histc(x_norm, bins=10, min=-5, max=5)
+                
+                if self.cumulative_train_counts is None:
+                    self.cumulative_train_counts = train_counts.detach().cpu().numpy()
+                else:
+                    self.cumulative_train_counts += train_counts.detach().cpu().numpy()
+
             if self.origin_norm is None:
                 self.origin_norm = nn.BatchNorm2d(x.size()[1], eps=self.eps, track_running_stats=True)
             return self.origin_norm(x)

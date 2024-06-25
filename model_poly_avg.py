@@ -90,6 +90,17 @@ def get_act_statistics(model, epoch, log_file):
                     f.write(f"Layer: {layer.custom_settings.relu_type} avg_input_mean: {avg_input_mean:.2f} avg_input_var: {avg_input_var:.2f} median_input_var: {median:.2f} q1_input_var: {q1:.2f} q3_input_var: {q3:.2f}\n")
                     layer.reset_stats()
 
+def get_norm_statistics(model, epoch, log_file):
+    with open(log_file, "a") as f:
+        f.write(f"Epoch: {epoch}\n")
+        for layer in model.modules():
+            if isinstance(layer, MyLayerNorm):
+                if layer.cumulative_train_counts is not None:
+                    # Assuming cumulative_train_counts is a list or similar structure
+                    counts_str = ", ".join(map(str, layer.cumulative_train_counts))
+                    f.write(f"Layer: {layer.number}, Counts: {counts_str}\n")
+
+
 class Conv2dPruned(nn.Conv2d):
     def __init__(self, custom_settings, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
         super().__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
