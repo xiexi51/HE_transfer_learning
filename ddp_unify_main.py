@@ -30,7 +30,7 @@ from torchvision import models
 from demonet import DemoNet
 from utils import CustomSettings
 from my_layer_norm import MyLayerNorm, get_ln_statistics
-from model_poly_avg import get_act_statistics, get_norm_statistics
+from model_poly_avg import get_act_statistics, get_norm_statistics2
 from resnet import ResNet18, ResNet34, ResNet50
 from vgg import my_vgg19
 
@@ -508,7 +508,7 @@ def process(pn, args):
 
         if pn == 0:
             get_act_statistics(model.module, epoch, f"{log_dir}/act_stats.txt")
-            get_norm_statistics(model.module, epoch, f"{log_dir}/norm_stats.txt")
+            get_norm_statistics2(model.module, epoch, f"{log_dir}/norm_stats2")
 
         if True or mask_begin < 0.01:
             if mask is not None:

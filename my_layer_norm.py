@@ -108,11 +108,11 @@ class MyLayerNorm(Module):
         self.epoch_test_var_sum = 0
         self.epoch_test_var_mean_count = 0
 
-        self.cumulative_train_counts = None
+        # self.cumulative_train_counts = None
 
-        # self.cumulative_x_norm_mean = None
-        # self.cumulative_x_norm_var = None
-        # self.cumulative_count = 0
+        self.cumulative_x_norm_mean = None
+        self.cumulative_x_norm_var = None
+        self.cumulative_count = 0
 
         self.saved_var = None
 
@@ -185,23 +185,17 @@ class MyLayerNorm(Module):
                 var = mean_x2 - mean ** 2
                 x_norm = (x - mean.view(1, -1, 1, 1)) / torch.sqrt(var.view(1, -1, 1, 1) + self.eps)
 
-                hist_min = -5
-                hist_max = 5
+                x_norm_mean = x_norm.mean(dim=[0, 2, 3]).detach().cpu().numpy()
+                x_norm_var = x_norm.var(dim=[0, 2, 3], unbiased=False).detach().cpu().numpy()
 
-                train_counts = torch.histc(x_norm, bins=10, min=hist_min, max=hist_max)
-
-                below_min = torch.sum(x_norm < hist_min).item()
-                above_max = torch.sum(x_norm > hist_max).item()
-
-                extended_counts = torch.zeros(10 + 2)
-                extended_counts[0] = below_min
-                extended_counts[-1] = above_max
-                extended_counts[1:-1] = train_counts
-                
-                if self.cumulative_train_counts is None:
-                    self.cumulative_train_counts = extended_counts.detach().cpu().numpy()
+                if self.cumulative_x_norm_mean is None:
+                    self.cumulative_x_norm_mean = x_norm_mean
+                    self.cumulative_x_norm_var = x_norm_var
                 else:
-                    self.cumulative_train_counts += extended_counts.detach().cpu().numpy()
+                    self.cumulative_x_norm_mean += x_norm_mean
+                    self.cumulative_x_norm_var += x_norm_var
+                self.cumulative_count += 1
+                
             
             # if self.gain is None:
             #     self.gain = nn.Parameter(torch.ones(x.size()[1:]))

@@ -90,15 +90,53 @@ def get_act_statistics(model, epoch, log_file):
                     f.write(f"Layer: {layer.custom_settings.relu_type} avg_input_mean: {avg_input_mean:.2f} avg_input_var: {avg_input_var:.2f} median_input_var: {median:.2f} q1_input_var: {q1:.2f} q3_input_var: {q3:.2f}\n")
                     layer.reset_stats()
 
-def get_norm_statistics(model, epoch, log_file):
-    with open(log_file, "a") as f:
-        f.write(f"Epoch: {epoch}\n")
-        for layer in model.modules():
-            if isinstance(layer, MyLayerNorm):
-                if layer.cumulative_train_counts is not None:
-                    # Assuming cumulative_train_counts is a list or similar structure
-                    counts_str = ", ".join(map(str, layer.cumulative_train_counts))
-                    f.write(f"Layer: {layer.number}, Counts: {counts_str}\n")
+# def get_norm_statistics(model, epoch, log_file):
+#     with open(log_file, "a") as f:
+#         f.write(f"Epoch: {epoch}\n")
+#         for layer in model.modules():
+#             if isinstance(layer, MyLayerNorm):
+#                 if layer.cumulative_train_counts is not None:
+#                     # Assuming cumulative_train_counts is a list or similar structure
+#                     counts_str = ", ".join(map(str, layer.cumulative_train_counts))
+#                     f.write(f"Layer: {layer.number}, Counts: {counts_str}\n")
+
+def get_norm_statistics2(model, epoch, log_file):
+    data = {
+        'epoch': [],
+        'layers': []
+    }
+    try:
+        existing_data = np.load(log_file, allow_pickle=True)
+        data['epoch'] = existing_data['epoch'].tolist()
+        data['layers'] = existing_data['layers'].tolist()
+    except FileNotFoundError:
+        pass
+
+    current_epoch_data = {
+        'epoch': epoch,
+        'layers': []
+    }
+    
+    for layer in model.modules():
+        if isinstance(layer, MyLayerNorm):
+            if layer.cumulative_x_norm_mean is not None:
+                layer.cumulative_x_norm_mean /= layer.cumulative_count
+                layer.cumulative_x_norm_var /= layer.cumulative_count
+                
+                current_epoch_data['layers'].append({
+                    'layer': str(layer),
+                    'cumulative_x_norm_mean': layer.cumulative_x_norm_mean,
+                    'cumulative_x_norm_var': layer.cumulative_x_norm_var
+                })
+
+                layer.cumulative_x_norm_mean = None
+                layer.cumulative_x_norm_var = None
+                layer.cumulative_count = 0
+    
+    data['epoch'].append(current_epoch_data['epoch'])
+    data['layers'].append(current_epoch_data['layers'])
+    
+    np.savez(log_file, epoch=np.array(data['epoch']), layers=np.array(data['layers'], dtype=object))
 
 
 class Conv2dPruned(nn.Conv2d):
