@@ -15,6 +15,10 @@ a6000_login = "xix22010@192.168.10.16"
 ssh_options = f"-o ProxyJump={cse_gateway_login} -o StrictHostKeyChecking=no "
 
 def slience_cmd(cmd, silent=True):
+    forbidden_keywords = ["ssh", "scp"]
+    if any(keyword in cmd for keyword in forbidden_keywords):
+        raise RuntimeError(f"Command '{cmd}' contains forbidden keyword (ssh/scp) and is not allowed.")
+
     try:
         if silent:
             subprocess.run(cmd, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -24,10 +28,43 @@ def slience_cmd(cmd, silent=True):
         print(f"Error: {e}")
 
 def copy_to_a6000(source, destination, silent=True):
+    raise RuntimeError(f"copy_to_a6000 is currently not allowed.")
+
     if not os.path.exists(source):
         print(f"Error: {source} does not exist")
         return
     slience_cmd(f"scp {ssh_options} {source} {a6000_login}:{destination}", silent=silent)
+
+
+def copy_to_sensei(source, destination, silent=True):
+    if not os.path.exists(source):
+        print(f"Error: {source} does not exist")
+        return
+
+    base_dir = "/sensei-fs/users/hongwup/sec/"
+    full_destination = os.path.join(base_dir, destination)
+
+    try:
+        if os.path.isdir(source):
+            shutil.copytree(source, full_destination, dirs_exist_ok=True)
+        else:
+            if os.path.isdir(full_destination):
+                full_path = os.path.join(full_destination, os.path.basename(source))
+            else:
+                full_path = full_destination
+            shutil.copy2(source, full_path)
+
+        if not silent:
+            print(f"Copied {source} → {full_destination}")
+    except Exception as e:
+        print(f"Copy failed: {e}")
+
+
+def copy_tensorboard_logs_sensei(log_dir, sensei_log_dir):
+    tb_files = glob.glob(os.path.join(log_dir, 'events.out.tfevents.*'))
+    for tb_file in tb_files:
+        destination = os.path.join(sensei_log_dir, os.path.basename(tb_file))
+        copy_to_sensei(tb_file, destination)
 
 def copy_tensorboard_logs(log_dir, a6000_log_dir):
     tb_files = glob.glob(os.path.join(log_dir, 'events.out.tfevents.*'))

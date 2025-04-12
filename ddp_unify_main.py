@@ -12,7 +12,7 @@ import ast
 import numpy as np
 import re
 from ddp_unify_training import ddp_unify_train, ddp_test, single_test
-from utils import MaskProvider, change_print_for_distributed, slience_cmd, copy_to_a6000, copy_tensorboard_logs, ssh_options, a6000_login
+from utils import MaskProvider, change_print_for_distributed, slience_cmd, copy_to_sensei, copy_tensorboard_logs, ssh_options
 from datetime import datetime
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data.distributed import DistributedSampler
@@ -352,29 +352,49 @@ def process(pn, args):
     print("log_dir = ", log_dir)
     args.log_dir = log_dir
     
-    a6000_store_root = "/home/xix22010/py_projects/from_azure"
-    a6000_log_dir = os.path.join(a6000_store_root, log_dir)
-    
+    __store_root = "./r18_1"
+    sensei_log_dir = os.path.join(__store_root, log_dir)
+
     if pn == 0: 
+        # Create local log directory if it doesn't exist
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
+
+        # Save training arguments
         args_file = os.path.join(log_dir, "args.txt")
         with open(args_file, 'w') as file:
             for key, value in vars(args).items():
                 file.write(f'{key}: {value}\n')
+
+        # Save command used to run the script
         cmd_file = os.path.join(log_dir, "cmd.txt")
         with open(cmd_file, 'w') as file:
             file.write(args.cmd)
+
         writer = SummaryWriter(log_dir=log_dir)
     else:
         writer = None
 
-    if world_pn == 0 and args.copy_to_a6000:
-        slience_cmd(f"ssh {ssh_options} {a6000_login} 'mkdir -p {a6000_log_dir}'")
-        copy_to_a6000(args_file, os.path.join(a6000_log_dir, "args.txt"))
-        copy_to_a6000(cmd_file, os.path.join(a6000_log_dir, "cmd.txt"))
-        slience_cmd(f"ssh {ssh_options} {a6000_login} 'mkdir -p {a6000_log_dir}/src'")
-        slience_cmd(f"scp {ssh_options} ./*.py {a6000_login}:{a6000_log_dir}/src/")
+    if world_pn == 0 and args.copy_to_sensei:
+        # Define target path on Sensei filesystem
+        sensei_base = "/sensei-fs/users/hongwup/sec"
+        sensei_log_dir = os.path.join(sensei_base, sensei_log_dir)
+
+        # Create log directory on Sensei
+        slience_cmd(f"mkdir -p {sensei_log_dir}")
+
+        # Copy args.txt and cmd.txt to Sensei
+        copy_to_sensei(args_file, os.path.join(sensei_log_dir, "args.txt"))
+        copy_to_sensei(cmd_file, os.path.join(sensei_log_dir, "cmd.txt"))
+
+        # Create src/ subdirectory on Sensei
+        slience_cmd(f"mkdir -p {os.path.join(sensei_log_dir, 'src')}")
+
+        # Copy all local .py files to Sensei log directory under src/
+        for py_file in os.listdir("."):
+            if py_file.endswith(".py"):
+                copy_to_sensei(py_file, os.path.join(sensei_log_dir, "src", py_file))
+
     
     dist.barrier()
 
@@ -582,21 +602,32 @@ def process(pn, args):
                     oldest_checkpoint = recent_checkpoints.pop(0)
                     os.remove(oldest_checkpoint)
 
-        if world_pn == 0 and args.copy_to_a6000:
-            copy_to_a6000(os.path.join(log_dir, "acc.txt"), a6000_log_dir)
-            copy_tensorboard_logs(log_dir, a6000_log_dir)
-            copy_to_a6000(os.path.join(log_dir, "var.txt"), a6000_log_dir)
-            print(f"copied acc.txt and tensorboard event to a6000")
+
+        if world_pn == 0 and args.copy_to_sensei:
+            # Copy acc.txt
+            copy_to_sensei(os.path.join(log_dir, "acc.txt"), os.path.join(sensei_log_dir, "acc.txt"))
+
+            # Copy tensorboard logs (assuming the function handles destination)
+            copy_tensorboard_logs_sensei(log_dir, sensei_log_dir)
+
+            # Copy var.txt
+            copy_to_sensei(os.path.join(log_dir, "var.txt"), os.path.join(sensei_log_dir, "var.txt"))
+
+            print(f"Copied acc.txt, var.txt and tensorboard logs to sensei-fs")
+
+            # Copy model checkpoints every N epochs
             if args.copy_model_every_epoch > 0 and (epoch + 1) % args.copy_model_every_epoch == 0:
-                copy_to_a6000(checkpoint_path, a6000_log_dir, silent=False)
-                copy_to_a6000(os.path.join(log_dir, "best_model.pth"), a6000_log_dir, silent=False)
+                copy_to_sensei(checkpoint_path, os.path.join(sensei_log_dir, os.path.basename(checkpoint_path)), silent=False)
+                copy_to_sensei(os.path.join(log_dir, "best_model.pth"), os.path.join(sensei_log_dir, "best_model.pth"), silent=False)
+
+
 
         dist.barrier()
 
     if writer is not None:
         writer.close()
-    if world_pn == 0 and args.copy_to_a6000 and args.copy_model_every_epoch > 0:
-        copy_to_a6000(os.path.join(log_dir, "best_model.pth"), a6000_log_dir, silent=False)
+    if world_pn == 0 and args.copy_to_sensei and args.copy_model_every_epoch > 0:
+        copy_to_sensei(os.path.join(log_dir, "best_model.pth"), sensei_log_dir, silent=False)
 
 if __name__ == "__main__":
     setproctitle.setproctitle("ddp")
@@ -611,7 +642,8 @@ if __name__ == "__main__":
     parser.add_argument('--pbar', type=ast.literal_eval, default=True)
     parser.add_argument('--log_root', type=str)
 
-    parser.add_argument('--copy_to_a6000', type=ast.literal_eval, default=True)
+    # parser.add_argument('--copy_to_a6000', type=ast.literal_eval, default=True)
+    parser.add_argument('--copy_to_sensei', type=ast.literal_eval, default=True)
     parser.add_argument('--iter_break', type=int, default=0)
 
     parser.add_argument("--master_ip", type=str, default="127.0.0.1")
@@ -805,16 +837,20 @@ if __name__ == "__main__":
         return key, value
 
     if args.resume:
-        args_file = args.resume_dir + '/args.txt'
+        args_file = f"{args.resume_dir}/args.txt"
+        skip_keys = {
+            'lr', 'total_epochs', 'master_ip', 'master_port', 'keep_checkpoints',
+            'copy_to_a6000', 'copy_to_sensei', 'log_root', 'world_size', 'node_rank_begin',
+            'id', 'only_test'
+        }
+        skip_prefixes = ('resume', 'reload', 'batch_size', 'num_train_loader', 'num_test_loader')
+
         with open(args_file, 'r') as file:
             for line in file:
                 key, value = parse_args_line(line.strip())
-                if hasattr(args, key) and not key.startswith('resume') and not key.startswith('reload'):
-                    if (not key.startswith('batch_size') and not key == 'lr' and not key.startswith('num_train_loader') 
-                        and not key.startswith('num_test_loader') and not key == 'total_epochs' and not key == 'master_ip'
-                        and not key == 'master_port' and not key == 'keep_checkpoints' and not key == 'copy_to_a6000' and not key == 'log_root'
-                        and not key == 'world_size' and not key == 'node_rank_begin' and not key == 'id' and not key == 'only_test'):
-                        setattr(args, key, value)
+                if hasattr(args, key) and key not in skip_keys and not key.startswith(skip_prefixes):
+                    setattr(args, key, value)
+
 
     args.node_gpu_count = torch.cuda.device_count()
 
