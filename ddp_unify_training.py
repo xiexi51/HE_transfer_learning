@@ -117,7 +117,7 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
         if mixup_fn is not None:
             x, y = mixup_fn(x, y)
         
-        with torch.cuda.amp.autocast(enabled=args.use_amp, dtype=amp_dtype):
+        with torch.amp.autocast(device_type='cuda', enabled=args.use_amp, dtype=amp_dtype):
             if model_t is not None and (args.loss_conv_prune_factor > 0 or args.loss_fm_factor > 0 or args.loss_kd_factor > 0):
                 with torch.no_grad():
                     set_forward_with_fms(model_t, True)
@@ -262,6 +262,8 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
         
         if args.pbar and world_pn == 0:
             pbar.set_postfix_str(f"L{train_loss/total:.2e},fm{train_loss_fm/total:.2e},kd{train_loss_kd/total:.2e},ce{train_loss_ce/total:.2e},conv{active_conv_rate:.3f},var{train_loss_var/total:.2e} 1a {100*iter_train_acc:.1f} f {filtered}")
+        
+        
 
     # print(mask_current, mask[1])
 
@@ -301,7 +303,7 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, world_pn, t
 
         x, y = x.cuda(), y.cuda()
         
-        with torch.cuda.amp.autocast(enabled=args.use_amp, dtype=amp_dtype):
+        with torch.amp.autocast(device_type='cuda', enabled=args.use_amp, dtype=amp_dtype):
             with torch.no_grad():
                 if args.v_type != "demo" and args.v_type != "v19" and args.v_type.isdigit() and not int(args.v_type) >= 18:
                     set_forward_with_fms(model, False)
@@ -356,6 +358,8 @@ def ddp_test(args, testloader, model, epoch, best_acc, mask, writer, world_pn, t
         test_acc = reduced_top1_total/reduced_total
         if args.pbar and world_pn == 0:
             pbar.set_postfix_str(f"1a {100*reduced_top1_total/reduced_total:.2f}, 5a {100*reduced_top5_total/reduced_total:.2f}, best {100*best_acc:.2f}")
+
+        
         
     # test_acc = (top1_total / total).item()
     if writer is not None:

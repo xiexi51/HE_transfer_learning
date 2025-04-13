@@ -8,6 +8,8 @@ import torch.distributed as dist
 import subprocess
 import glob
 import os
+import shutil
+
 
 cse_gateway_login = "xix22010@137.99.0.102"
 a6000_login = "xix22010@192.168.10.16"

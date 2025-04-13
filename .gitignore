@@ -10,3 +10,4 @@ ip_list
 /save_*
 /success_*
 /pruned_*
+core.*

@@ -7,8 +7,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from timm.models.layers import DropPath
-from timm.models.registry import register_model
+from timm.layers import DropPath
+from timm.models import register_model
 import os
 from model_poly_avg import Conv2dPruned, custom_relu
 from my_layer_norm import MyLayerNorm

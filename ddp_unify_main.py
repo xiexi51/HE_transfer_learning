@@ -1,3 +1,7 @@
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+
+
 import os
 import timm
 import timm.optim
@@ -12,7 +16,7 @@ import ast
 import numpy as np
 import re
 from ddp_unify_training import ddp_unify_train, ddp_test, single_test
-from utils import MaskProvider, change_print_for_distributed, slience_cmd, copy_to_sensei, copy_tensorboard_logs, ssh_options
+from utils import MaskProvider, change_print_for_distributed, slience_cmd, copy_to_sensei, copy_tensorboard_logs_sensei, ssh_options
 from datetime import datetime
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data.distributed import DistributedSampler
@@ -23,7 +27,7 @@ from vanillanet_deploy_poly import VanillaNet_deploy_poly
 from vanillanet_full_unify import vanillanet_5_full_unify, vanillanet_6_full_unify, vanillanet_7_full_unify, VanillaNetFullUnify
 from model_poly_avg import ResNet18AvgCustom, ResNetAvgCustom, Conv2dPruned, custom_relu
 from model import initialize_resnet
-from locals import proj_root
+# from locals import proj_root
 import setproctitle
 import sys
 from torchvision import models
