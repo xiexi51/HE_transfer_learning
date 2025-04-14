@@ -6,49 +6,6 @@ from numpy.polynomial import Chebyshev
 import numpy as np
 from utils import CustomSettings
 
-class MyCheb():
-    def __init__(self):
-        self.store_degree = None
-        self.store_a = None
-        self.store_b = None
-        self.coeffs = None
-
-    def get_coeffs(self, degree, a, b, device):
-        f = lambda x: x**-0.5
-        f_mapped = lambda x: f((b - a)/2 * x + (b + a)/2)
-        nodes = Chebyshev.basis(degree + 1).roots()
-        nodes_mapped = (b - a)/2 * nodes + (b + a)/2
-        values = f(nodes_mapped)
-        self.coeffs = torch.tensor(Chebyshev.fit(nodes, values, degree).convert().coef, device=device)
-        self.store_degree = degree
-        self.store_a = a
-        self.store_b = b
-    
-    def calculate(self, input, degree, a, b):
-        if degree == -1:
-            return 1 / torch.sqrt(input)
-        if not (degree == self.store_degree and a == self.store_a and b == self.store_b):
-            self.get_coeffs(degree, a, b, input.device)
-        
-        with torch.no_grad():
-            x = (2*input - a - b)/(b - a)
-            x2 = 2*x
-
-            if len(self.coeffs) == 1:
-                c0 = self.coeffs[0]
-                c1 = 0
-            elif len(self.coeffs) == 2:
-                c0 = self.coeffs[0]
-                c1 = self.coeffs[1]
-            else:
-                x2 = 2*x
-                c0 = self.coeffs[-2]
-                c1 = self.coeffs[-1]
-                for i in range(3, len(self.coeffs) + 1):
-                    tmp = c0
-                    c0 = self.coeffs[-i] - c1
-                    c1 = tmp + c1*x2
-        return c0 + c1*x
 
 
 class MyLayerNorm(Module):
@@ -57,8 +14,7 @@ class MyLayerNorm(Module):
         self.is_setup = False
         self.number = 0
         self.cheb_params = [4, 0.1, 5]
-        self.training_use_cheb = False
-        self.cheb = MyCheb()
+        self.training_use_cheb = False 
         self.use_running_var_mean = False
         self.var_norm_boundary = 3
 
@@ -243,6 +199,8 @@ class MyLayerNorm(Module):
 
         dims = [-(i + 1) for i in range(len(self.normalized_shape))]
 
+        assert self.ln_group_size == 0, "currently disable group"
+
         if self.ln_group_size > 0:
             assert x.shape[1] % self.ln_group_size == 0, f"Number of channels must be divisible by {self.ln_group_size}."
             x_grouped = x.view(x.shape[0], -1, self.ln_group_size, *x.shape[2:])
@@ -302,21 +260,22 @@ class MyLayerNorm(Module):
         
         with torch.no_grad():
             if not self.training or self.use_running_var_mean:
-                var_normed_counts = (var / _running_var_mean).squeeze().detach().cpu().numpy()
+                pass
+                # var_normed_counts = (var / _running_var_mean).squeeze().detach().cpu().numpy()
                 
-                bins = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, np.inf]
-                counts, _ = np.histogram(var_normed_counts, bins=bins)
+                # bins = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, np.inf]
+                # counts, _ = np.histogram(var_normed_counts, bins=bins)
 
-                if self.training:
-                    if self.counts_train is None:
-                        self.counts_train = counts
-                    else:
-                        self.counts_train += counts
-                else:
-                    if self.counts_test is None:
-                        self.counts_test = counts
-                    else:
-                        self.counts_test += counts
+                # if self.training:
+                #     if self.counts_train is None:
+                #         self.counts_train = counts
+                #     else:
+                #         self.counts_train += counts
+                # else:
+                #     if self.counts_test is None:
+                #         self.counts_test = counts
+                #     else:
+                #         self.counts_test += counts
 
         if self.training and not self.training_use_cheb:
             x_norm = (x - mean) / torch.sqrt(var + self.eps)
@@ -334,7 +293,8 @@ class MyLayerNorm(Module):
                 _c = self.ln_quad_coeffs[2] + self.quad_finetune_param[2] * self.ln_quad_finetune_factors[2]
                 cheb_result = _a * (var_normed - _b) ** 2 + _c
             else:
-                cheb_result = self.cheb.calculate(var_normed + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
+                raise NotImplementedError("Cheb is currently disabled.")
+                # cheb_result = self.cheb.calculate(var_normed + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
 
             if self.training:
                 var_mask = var_normed > self.var_norm_boundary

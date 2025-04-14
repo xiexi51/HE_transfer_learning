@@ -25,7 +25,7 @@ import torch.distributed as dist
 from utils_dataset import build_dataset
 from vanillanet_deploy_poly import VanillaNet_deploy_poly
 from vanillanet_full_unify import vanillanet_5_full_unify, vanillanet_6_full_unify, vanillanet_7_full_unify, VanillaNetFullUnify
-from model_poly_avg import ResNet18AvgCustom, ResNetAvgCustom, Conv2dPruned, custom_relu
+from model_poly_avg import ResNet18AvgCustom, ResNetAvgCustom, custom_relu
 from model import initialize_resnet
 # from locals import proj_root
 import setproctitle
@@ -280,11 +280,11 @@ def process(pn, args):
                 if not name.endswith("rand_mask"):
                     param.requires_grad = True
 
-    if args.loss_conv_prune_factor == 0:
-        for name, module in model.named_modules():
-            if isinstance(module, Conv2dPruned):
-                if hasattr(module, 'weight_aux') and module.weight_aux is not None:
-                    module.weight_aux.requires_grad = False
+    # if args.loss_conv_prune_factor == 0:
+    #     for name, module in model.named_modules():
+    #         if isinstance(module, Conv2dPruned):
+    #             if hasattr(module, 'weight_aux') and module.weight_aux is not None:
+    #                 module.weight_aux.requires_grad = False
 
     model = model.cuda()
 
