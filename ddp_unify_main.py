@@ -114,7 +114,7 @@ def process(pn, args):
         
     model_custom_settings = CustomSettings(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, 
                                            args.prune_1_1_kernel, args.norm_type, args.cheb_params, args.training_use_cheb, 
-                                           args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_trainable_quad_finetune,
+                                           args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_k, args.ln_mu, args.ln_trainable_quad_finetune,
                                            args.ln_quad_coeffs, args.ln_quad_finetune_factors, args.ln_x_scaler, args.ln_group_size, 
                                            args.relu_dropout, args.drop_rate, args.var_norm_scaler)
 
@@ -679,8 +679,12 @@ if __name__ == "__main__":
     parser.add_argument('--ln_trainable_quad_finetune', type=ast.literal_eval, default=False)
     parser.add_argument('--ln_quad_coeffs', nargs=3, type=float, default=[0.01, 10, 0.07])
     parser.add_argument('--ln_quad_finetune_factors', nargs=3, type=float, default=[0.0001, 0.1, 0.001])
-    parser.add_argument('--ln_x_scaler', type=float, default=0.2)
-    parser.add_argument('--ln_group_size', type=int, default=64)
+
+    parser.add_argument('--ln_k', type=float)
+    parser.add_argument('--ln_mu', type=float)
+
+    parser.add_argument('--ln_x_scaler', type=float, default=1)
+    parser.add_argument('--ln_group_size', type=int, default=0)
     parser.add_argument('--filter_var_mean_epoch', type=int, default=10)
     parser.add_argument('--filter_var_mean', type=float, default=10)
     parser.add_argument('--relu_dropout', type=float, default=0.2)

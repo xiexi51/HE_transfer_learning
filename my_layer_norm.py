@@ -16,10 +16,10 @@ class MyLayerNorm(Module):
         self.cheb_params = [4, 0.1, 5]
         self.training_use_cheb = False 
         self.use_running_var_mean = False
-        self.var_norm_boundary = 3
+        # self.var_norm_boundary = 3
 
         self.ln_x_scaler = 1
-        self.var_norm_scaler = 1
+        # self.var_norm_scaler = 1
 
         self.ln_group_size = 64
         self.group_num = 1
@@ -33,7 +33,10 @@ class MyLayerNorm(Module):
         self.norm_type = "my_layernorm"
         self.origin_norm = None
 
-        self.ln_use_quad = True
+        self.ln_k = 4.9
+        self.ln_mu = 1
+
+        self.ln_use_quad = False
         self.ln_trainable_quad_finetune = True
         self.ln_quad_coeffs = [0.03, 10, 0.2]
         self.ln_quad_finetune_factors = [0.0001, 0.1, 0.001]
@@ -79,17 +82,27 @@ class MyLayerNorm(Module):
         self.is_setup = True
         self.cheb_params = custom_settings.cheb_params
         self.training_use_cheb = custom_settings.training_use_cheb
-        self.var_norm_boundary = custom_settings.var_norm_boundary
+        # self.var_norm_boundary = custom_settings.var_norm_boundary
+
         self.ln_momentum = custom_settings.ln_momentum
 
         self.ln_x_scaler = custom_settings.ln_x_scaler
-        self.var_norm_scaler = custom_settings.var_norm_scaler
+        # self.var_norm_scaler = custom_settings.var_norm_scaler
 
         self.ln_group_size = custom_settings.ln_group_size
 
         self.norm_type = custom_settings.norm_type
 
         self.ln_use_quad = custom_settings.ln_use_quad
+        assert self.ln_use_quad == False
+
+        self.ln_k = custom_settings.ln_k
+        self.ln_mu = custom_settings.ln_mu
+
+        
+        self.g_2 = 1 / ( 4 * (self.ln_k-1) * self.ln_mu**(1 / 2) )
+        self.g_3 = (5 - self.ln_k) / ( 4 * self.ln_mu**(1 / 2) ) 
+
         self.ln_trainable_quad_finetune = custom_settings.ln_trainable_quad_finetune
         self.ln_quad_coeffs = custom_settings.ln_quad_coeffs
         self.ln_quad_finetune_factors = custom_settings.ln_quad_finetune_factors
@@ -104,7 +117,7 @@ class MyLayerNorm(Module):
         if self.normalized_shape is None:
             self.normalized_shape = x.size()[1:]
 
-        x *= self.ln_x_scaler
+        # x *= self.ln_x_scaler
 
         if self.norm_type == "layernorm":
             if self.training:
@@ -233,6 +246,8 @@ class MyLayerNorm(Module):
             mean = mean.repeat_interleave(self.ln_group_size, dim=1).unsqueeze(-1).unsqueeze(-1)
             var = var.repeat_interleave(self.ln_group_size, dim=1).unsqueeze(-1).unsqueeze(-1)
 
+        assert self.filter_var_mean == 0
+
         if self.training and self.filter_var_mean > 0:
             if (var_mean > self.running_var_mean * self.filter_var_mean).any():
                 self.filter_var_mean_times = 1
@@ -258,9 +273,9 @@ class MyLayerNorm(Module):
         else:
             _running_var_mean = self.running_var_mean
         
-        with torch.no_grad():
-            if not self.training or self.use_running_var_mean:
-                pass
+        # with torch.no_grad():
+        #     if not self.training or self.use_running_var_mean:
+        #         pass
                 # var_normed_counts = (var / _running_var_mean).squeeze().detach().cpu().numpy()
                 
                 # bins = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, np.inf]
@@ -280,27 +295,30 @@ class MyLayerNorm(Module):
         if self.training and not self.training_use_cheb:
             x_norm = (x - mean) / torch.sqrt(var + self.eps)
         else:
+            assert not self.use_running_var_mean
             if self.training and not self.use_running_var_mean:
-                var_normed = self.var_norm_scaler * var / var_mean
-                var_rescale = torch.sqrt(var_mean / self.var_norm_scaler)
+                final_var_mean = var_mean
             else:
-                var_normed = self.var_norm_scaler * var / _running_var_mean
-                var_rescale = torch.sqrt(_running_var_mean / self.var_norm_scaler)
+                final_var_mean = _running_var_mean
+
+            v = var / final_var_mean
+
+            f_result = torch.sqrt(1 / self.ln_mu * v)
+            g_result = (v - self.ln_k) ** 2 * self.g_2 + self.g_3
             
-            if self.ln_use_quad:
-                _a = self.ln_quad_coeffs[0] + self.quad_finetune_param[0] * self.ln_quad_finetune_factors[0]
-                _b = self.ln_quad_coeffs[1] + self.quad_finetune_param[1] * self.ln_quad_finetune_factors[1]
-                _c = self.ln_quad_coeffs[2] + self.quad_finetune_param[2] * self.ln_quad_finetune_factors[2]
-                cheb_result = _a * (var_normed - _b) ** 2 + _c
-            else:
-                raise NotImplementedError("Cheb is currently disabled.")
-                # cheb_result = self.cheb.calculate(var_normed + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
+            # if self.ln_use_quad:
+            #     _a = self.ln_quad_coeffs[0] + self.quad_finetune_param[0] * self.ln_quad_finetune_factors[0]
+            #     _b = self.ln_quad_coeffs[1] + self.quad_finetune_param[1] * self.ln_quad_finetune_factors[1]
+            #     _c = self.ln_quad_coeffs[2] + self.quad_finetune_param[2] * self.ln_quad_finetune_factors[2]
+            #     cheb_result = _a * (var_normed - _b) ** 2 + _c
+            # else:
+            #     raise NotImplementedError("Cheb is currently disabled.")
+            #     # cheb_result = self.cheb.calculate(var_normed + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
 
             if self.training:
-                var_mask = var_normed > self.var_norm_boundary
-                cheb_result[var_mask] = 1 / torch.sqrt(var_normed[var_mask] + self.eps)
+                g_result[v > self.ln_k * self.ln_mu] = f_result[v > self.ln_k * self.ln_mu]
 
-            x_norm = (x - mean) * (cheb_result / var_rescale * (1 - self.mask) + 1 / torch.sqrt(var + self.eps) * self.mask)
+            x_norm = (x - mean) * g_result * torch.sqrt(self.ln_mu / final_var_mean)
 
         with torch.no_grad():
             if self.training:
