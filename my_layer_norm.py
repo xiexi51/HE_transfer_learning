@@ -25,7 +25,7 @@ class MyLayerNorm(Module):
         self.group_num = 1
         self.ln_momentum = None
 
-        self.filter_var_mean = -1
+        self.filter_var_mean = 0
         self.filter_var_mean_times = 0
 
         self.mask = 0
@@ -94,7 +94,6 @@ class MyLayerNorm(Module):
         self.norm_type = custom_settings.norm_type
 
         self.ln_use_quad = custom_settings.ln_use_quad
-        assert self.ln_use_quad == False
 
         self.ln_k = custom_settings.ln_k
         self.ln_mu = custom_settings.ln_mu
@@ -295,7 +294,6 @@ class MyLayerNorm(Module):
         if self.training and not self.training_use_cheb:
             x_norm = (x - mean) / torch.sqrt(var + self.eps)
         else:
-            assert not self.use_running_var_mean
             if self.training and not self.use_running_var_mean:
                 final_var_mean = var_mean
             else:
