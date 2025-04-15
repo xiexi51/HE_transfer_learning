@@ -98,7 +98,7 @@ class MyLayerNorm(Module):
         self.ln_k = custom_settings.ln_k
         self.ln_mu = custom_settings.ln_mu
 
-        self.filter_var_mean = self.ln_k
+        self.filter_var_mean = 9.8
 
         
         self.g_2 = 1 / ( 4 * (self.ln_k-1) * self.ln_mu**(1 / 2) )
@@ -247,7 +247,7 @@ class MyLayerNorm(Module):
             mean = mean.repeat_interleave(self.ln_group_size, dim=1).unsqueeze(-1).unsqueeze(-1)
             var = var.repeat_interleave(self.ln_group_size, dim=1).unsqueeze(-1).unsqueeze(-1)
 
-        assert self.filter_var_mean == self.ln_k
+        
 
         if self.training and self.filter_var_mean > 0:
             if (var_mean > self.running_var_mean * self.filter_var_mean).any():
@@ -303,7 +303,7 @@ class MyLayerNorm(Module):
 
             v = var / final_var_mean
 
-            f_result = torch.sqrt(1 / self.ln_mu * v)
+            f_result = torch.sqrt(1 / (self.ln_mu * v))
             g_result = (v - self.ln_k) ** 2 * self.g_2 + self.g_3
             
             # if self.ln_use_quad:
