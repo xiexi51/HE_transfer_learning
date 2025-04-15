@@ -25,7 +25,7 @@ class MyLayerNorm(Module):
         self.group_num = 1
         self.ln_momentum = None
 
-        self.filter_var_mean = 0
+        self.filter_var_mean = 5
         self.filter_var_mean_times = 0
 
         self.mask = 0
@@ -49,7 +49,7 @@ class MyLayerNorm(Module):
         self.eps = eps
         self.elementwise_affine = elementwise_affine
         
-
+        
         self.train_var_list = []
         self.test_var_list = []
 
@@ -97,6 +97,8 @@ class MyLayerNorm(Module):
 
         self.ln_k = custom_settings.ln_k
         self.ln_mu = custom_settings.ln_mu
+
+        self.filter_var_mean = self.ln_k
 
         
         self.g_2 = 1 / ( 4 * (self.ln_k-1) * self.ln_mu**(1 / 2) )
@@ -245,7 +247,7 @@ class MyLayerNorm(Module):
             mean = mean.repeat_interleave(self.ln_group_size, dim=1).unsqueeze(-1).unsqueeze(-1)
             var = var.repeat_interleave(self.ln_group_size, dim=1).unsqueeze(-1).unsqueeze(-1)
 
-        assert self.filter_var_mean == 0
+        assert self.filter_var_mean == self.ln_k
 
         if self.training and self.filter_var_mean > 0:
             if (var_mean > self.running_var_mean * self.filter_var_mean).any():
@@ -314,7 +316,7 @@ class MyLayerNorm(Module):
             #     # cheb_result = self.cheb.calculate(var_normed + self.eps, int(self.cheb_params[0]), self.cheb_params[1], self.cheb_params[2])
 
             if self.training:
-                g_result[v > self.ln_k * self.ln_mu] = f_result[v > self.ln_k * self.ln_mu]
+                g_result[v > self.ln_k] = f_result[v > self.ln_k]
 
             x_norm = (x - mean) * g_result * torch.sqrt(self.ln_mu / final_var_mean)
 
