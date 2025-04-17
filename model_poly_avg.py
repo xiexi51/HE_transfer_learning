@@ -145,6 +145,10 @@ def get_norm_statistics2(model, epoch, log_file):
 class Conv2dPruned(nn.Conv2d): 
     def __init__(self, custom_settings, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
         super().__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias) 
+    def forward(self, x, threshold):
+        return super().forward(x) 
+    def get_conv_density(self):
+        return self.weight.numel(), self.weight.numel()
 
 
 # class Conv2dPruned(nn.Conv2d):
