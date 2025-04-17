@@ -620,9 +620,26 @@ def process(pn, args):
             print(f"Copied acc.txt, var.txt and tensorboard logs to sensei-fs")
 
             # Copy model checkpoints every N epochs
-            if args.copy_model_every_epoch > 0 and (epoch + 1) % args.copy_model_every_epoch == 0:
-                copy_to_sensei(checkpoint_path, os.path.join(sensei_log_dir, os.path.basename(checkpoint_path)), silent=False)
-                copy_to_sensei(os.path.join(log_dir, "best_model.pth"), os.path.join(sensei_log_dir, "best_model.pth"), silent=False)
+            # if args.copy_model_every_epoch > 0 and (epoch + 1) % args.copy_model_every_epoch == 0:
+            #     copy_to_sensei(checkpoint_path, os.path.join(sensei_log_dir, os.path.basename(checkpoint_path)), silent=False)
+            #     copy_to_sensei(os.path.join(log_dir, "best_model.pth"), os.path.join(sensei_log_dir, "best_model.pth"), silent=False)
+
+            if args.copy_model_every_epoch > 0:
+                # Define current and previous checkpoint filenames
+                current_checkpoint_filename = f"checkpoint_epoch_{epoch}.pth"
+                prev_checkpoint_filename = f"checkpoint_epoch_{epoch - 1}.pth"
+
+                current_checkpoint_path = os.path.join(log_dir, current_checkpoint_filename)
+                target_checkpoint_path = os.path.join(sensei_log_dir, current_checkpoint_filename)
+                prev_checkpoint_path = os.path.join(sensei_log_dir, prev_checkpoint_filename)
+
+                # Copy current checkpoint to sensei
+                copy_to_sensei(current_checkpoint_path, target_checkpoint_path, silent=False)
+
+                # Remove previous checkpoint in sensei
+                if os.path.exists(prev_checkpoint_path):
+                    os.remove(prev_checkpoint_path)
+                    print(f"Removed: {prev_checkpoint_path}")
 
 
 
