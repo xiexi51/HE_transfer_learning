@@ -121,11 +121,12 @@ class MyLayerNorm(Module):
         assert self.is_setup, "MyLayerNorm needs to be explicitly setup before forward pass."
 
         if self.normalized_shape is None:
-            self.normalized_shape = x.size()[1:]
+            self.normalized_shape = tuple(x.size(d) for d in self.ln_dims)
 
         # x *= self.ln_x_scaler
 
         if self.norm_type == "layernorm":
+            assert 0, "disable norm_type == layernorm"
             if self.training:
                 mean = x.mean(dim=[1,2,3])
                 mean_x2 = (x ** 2).mean(dim=[1,2,3])
@@ -216,15 +217,15 @@ class MyLayerNorm(Module):
                 if exponential_average_factor < self.ln_momentum:
                     exponential_average_factor = self.ln_momentum
 
-        dims = [-(i + 1) for i in range(len(self.normalized_shape))]
+        # dims = [-(i + 1) for i in range(len(self.normalized_shape))]
 
         assert self.ln_group_size == 0, "currently disable group"
 
         if self.ln_group_size > 0:
             assert x.shape[1] % self.ln_group_size == 0, f"Number of channels must be divisible by {self.ln_group_size}."
             x_grouped = x.view(x.shape[0], -1, self.ln_group_size, *x.shape[2:])
-            mean = x_grouped.mean(dim=dims, keepdim=False)
-            mean_x2 = (x_grouped ** 2).mean(dim=dims, keepdim=False)
+            mean = x_grouped.mean(dim=self.ln_dims, keepdim=False)
+            mean_x2 = (x_grouped ** 2).mean(dim=self.ln_dims, keepdim=False)
         else:
 
             mean = x.mean(dim=self.ln_dims, keepdim=True)
