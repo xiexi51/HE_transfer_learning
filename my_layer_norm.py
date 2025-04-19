@@ -38,7 +38,7 @@ class MyLayerNorm(Module):
 
         self.ln_k = 4.9
         self.ln_mu = 1
-        self.ln_dims = (1, 2, 3)
+        self.ln_norm_type = "chw"
 
         self.ln_use_quad = False
         self.ln_trainable_quad_finetune = True
@@ -101,7 +101,7 @@ class MyLayerNorm(Module):
 
         self.ln_k = custom_settings.ln_k
         self.ln_mu = custom_settings.ln_mu
-        self.ln_dims = tuple(custom_settings.ln_dims)
+        self.ln_norm_type = custom_settings.ln_norm_type
 
         self.filter_var_mean = 9.8
 
@@ -121,7 +121,10 @@ class MyLayerNorm(Module):
         assert self.is_setup, "MyLayerNorm needs to be explicitly setup before forward pass."
 
         if self.normalized_shape is None:
-            self.normalized_shape = tuple(x.size(d) for d in self.ln_dims)
+            if self.ln_norm_type == 'chw':
+                self.normalized_shape = x.size()[1:]
+            elif self.ln_norm_type == 'hw':
+                self.normalized_shape = x.size()[2:]
 
         # x *= self.ln_x_scaler
 
@@ -192,7 +195,10 @@ class MyLayerNorm(Module):
                 self.group_num = x.shape[1] // self.ln_group_size
                 self.register_buffer('running_var_mean', torch.ones(self.group_num))
             else:
-                self.register_buffer('running_var_mean', torch.ones(1))
+                if self.ln_norm_type == 'chw':
+                    self.register_buffer('running_var_mean', torch.ones(1))
+                elif self.ln_norm_type == 'hw':
+                    self.register_buffer('running_var_mean', torch.ones(x.shape[1]))
             # Create parameters for $\gamma$ and $\beta$ for gain and bias
             if self.norm_type == "my_layernorm" and self.elementwise_affine:
                 self.gain = nn.Parameter(torch.ones(self.normalized_shape))
@@ -227,15 +233,19 @@ class MyLayerNorm(Module):
             mean = x_grouped.mean(dim=self.ln_dims, keepdim=False)
             mean_x2 = (x_grouped ** 2).mean(dim=self.ln_dims, keepdim=False)
         else:
+            if self.ln_norm_type == 'chw':
+                mean = x.mean(dim=[1,2,3], keepdim=True)
+                mean_x2 = (x ** 2).mean(dim=[1,2,3], keepdim=True)
+            elif self.ln_norm_type == 'hw':
+                mean = x.mean(dim=[2,3], keepdim=True)
+                mean_x2 = (x ** 2).mean(dim=[2,3], keepdim=True)
 
-            mean = x.mean(dim=self.ln_dims, keepdim=True)
-            mean_x2 = (x ** 2).mean(dim=self.ln_dims, keepdim=True)
         var = mean_x2 - mean ** 2
 
         # x_norm = torch.zeros_like(x_reshaped, dtype=x_reshaped.dtype, device=x_reshaped.device)
         
 
-        var_mean = var.mean(dim=get_opposite_dims(4, self.ln_dims)).squeeze()
+        var_mean = var.mean(dim=0).squeeze()
 
         self.saved_var_mean = var_mean
 
@@ -257,6 +267,7 @@ class MyLayerNorm(Module):
             var = var.repeat_interleave(self.ln_group_size, dim=1).unsqueeze(-1).unsqueeze(-1)
 
         
+        assert var_mean.shape == self.running_var_mean.shape
 
         if self.training and self.filter_var_mean > 0:
             if (var_mean > self.running_var_mean * self.filter_var_mean).any():
@@ -309,7 +320,8 @@ class MyLayerNorm(Module):
                 final_var_mean = var_mean
             else:
                 final_var_mean = _running_var_mean
-
+            if self.ln_norm_type == 'hw':
+                final_var_mean = final_var_mean.view(1, -1, 1, 1)
             v = var / final_var_mean
 
             f_result = torch.sqrt(1 / (self.ln_mu * v))
