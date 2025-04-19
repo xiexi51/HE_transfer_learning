@@ -101,7 +101,7 @@ class MyLayerNorm(Module):
 
         self.ln_k = custom_settings.ln_k
         self.ln_mu = custom_settings.ln_mu
-        self.ln_dims = Tuple(custom_settings.ln_dims)
+        self.ln_dims = tuple(custom_settings.ln_dims)
 
         self.filter_var_mean = 9.8
 
@@ -233,13 +233,13 @@ class MyLayerNorm(Module):
 
         # x_norm = torch.zeros_like(x_reshaped, dtype=x_reshaped.dtype, device=x_reshaped.device)
         
-        print(var.dims)
+        print(var.shape)
 
         var_mean = var.mean(dim=get_opposite_dims(4, self.ln_dims)).squeeze()
 
         self.saved_var_mean = var_mean
 
-        print(self.saved_var_mean.dims)
+        print(self.saved_var_mean.shape)
 
         # if self.training and self.filter_var_mean:
         #     if var_mean > self.running_var_mean * 10:
