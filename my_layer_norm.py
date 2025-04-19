@@ -6,6 +6,9 @@ from numpy.polynomial import Chebyshev
 import numpy as np
 from utils import CustomSettings
 
+def get_opposite_dims(total_dim: int, dims):
+    all_dims = set(range(total_dim))
+    return sorted(all_dims - set(dims))
 
 
 class MyLayerNorm(Module):
@@ -35,6 +38,7 @@ class MyLayerNorm(Module):
 
         self.ln_k = 4.9
         self.ln_mu = 1
+        self.ln_dims = (1, 2, 3)
 
         self.ln_use_quad = False
         self.ln_trainable_quad_finetune = True
@@ -97,6 +101,7 @@ class MyLayerNorm(Module):
 
         self.ln_k = custom_settings.ln_k
         self.ln_mu = custom_settings.ln_mu
+        self.ln_dims = Tuple(custom_settings.ln_dims)
 
         self.filter_var_mean = 9.8
 
@@ -221,15 +226,20 @@ class MyLayerNorm(Module):
             mean = x_grouped.mean(dim=dims, keepdim=False)
             mean_x2 = (x_grouped ** 2).mean(dim=dims, keepdim=False)
         else:
-            mean = x.mean(dim=dims, keepdim=True)
-            mean_x2 = (x ** 2).mean(dim=dims, keepdim=True)
+
+            mean = x.mean(dim=self.ln_dims, keepdim=True)
+            mean_x2 = (x ** 2).mean(dim=self.ln_dims, keepdim=True)
         var = mean_x2 - mean ** 2
 
         # x_norm = torch.zeros_like(x_reshaped, dtype=x_reshaped.dtype, device=x_reshaped.device)
         
-        var_mean = var.mean(dim=0).squeeze()
+        print(var.dims)
+
+        var_mean = var.mean(dim=get_opposite_dims(4, self.ln_dims)).squeeze()
 
         self.saved_var_mean = var_mean
+
+        print(self.saved_var_mean.dims)
 
         # if self.training and self.filter_var_mean:
         #     if var_mean > self.running_var_mean * 10:

@@ -114,7 +114,7 @@ def process(pn, args):
         
     model_custom_settings = CustomSettings(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, 
                                            args.prune_1_1_kernel, args.norm_type, args.cheb_params, args.training_use_cheb, 
-                                           args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_k, args.ln_mu, args.ln_trainable_quad_finetune,
+                                           args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_k, args.ln_mu, args.ln_dims, args.ln_trainable_quad_finetune,
                                            args.ln_quad_coeffs, args.ln_quad_finetune_factors, args.ln_x_scaler, args.ln_group_size, 
                                            args.relu_dropout, args.drop_rate, args.var_norm_scaler)
 
@@ -166,7 +166,7 @@ def process(pn, args):
 
     teacher_custom_settings = CustomSettings(args.teacher_act_relu_type, [0, 0, 0], [0, 0, 0], args.teacher_prune_type, 
                                              args.teacher_prune_1_1_kernel, args.teacher_norm_type, args.cheb_params, args.training_use_cheb, 
-                                             args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_k, args.ln_mu, args.ln_trainable_quad_finetune,
+                                             args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_k, args.ln_mu, args.ln_dims, args.ln_trainable_quad_finetune,
                                              args.ln_quad_coeffs, args.ln_quad_finetune_factors, args.ln_x_scaler, args.ln_group_size, 
                                              args.relu_dropout, args.drop_rate, args.var_norm_scaler)
 
@@ -699,6 +699,9 @@ if __name__ == "__main__":
 
     parser.add_argument('--ln_k', type=float)
     parser.add_argument('--ln_mu', type=float)
+
+    parser.add_argument('--ln_dims', nargs='+', type=int)
+
 
     parser.add_argument('--ln_x_scaler', type=float, default=1)
     parser.add_argument('--ln_group_size', type=int, default=0)
