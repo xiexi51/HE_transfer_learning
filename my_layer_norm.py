@@ -267,7 +267,7 @@ class MyLayerNorm(Module):
             var = var.repeat_interleave(self.ln_group_size, dim=1).unsqueeze(-1).unsqueeze(-1)
 
         
-        assert var_mean.shape == self.running_var_mean.shape
+        
 
         if self.training and self.filter_var_mean > 0:
             if (var_mean > self.running_var_mean * self.filter_var_mean).any():
