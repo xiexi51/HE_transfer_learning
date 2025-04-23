@@ -869,7 +869,7 @@ if __name__ == "__main__":
         skip_keys = {
             'lr', 'total_epochs', 'master_ip', 'master_port', 'keep_checkpoints',
             'copy_to_a6000', 'copy_to_sensei', 'log_root', 'world_size', 'node_rank_begin',
-            'id', 'only_test'
+            'id', 'only_test', 'copy_model_every_epoch'
         }
         skip_prefixes = ('resume', 'reload', 'batch_size', 'num_train_loader', 'num_test_loader')
 
