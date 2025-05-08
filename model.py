@@ -83,24 +83,22 @@ class general_relu_poly(nn.Module):
             return F.relu(x)
 
         # Compute polynomial activation
+        assert self.if_channel
         if self.if_channel:
-            # weight: [C, act_degree+1] → [C, act_degree+1, 1, 1]
             weights = self.weight.unsqueeze(-1).unsqueeze(-1)
-            weights = weights.expand(-1, -1, x.size(2), x.size(3))  # [C, D+1, H, W]
-            factors = self.factors.view(1, -1, 1, 1)  # [1, D+1, 1, 1]
+            weights = weights.expand(-1, -1, x.size(2), x.size(3)) 
+            y = weights[:, 0, :, :] * self.factors[0] 
+            for d in range(self.act_degree):
+                y = y * x + weights[:, d + 1, :, :] * self.factors[d + 1]
 
-            y = torch.zeros_like(x)
-            x_power = torch.ones_like(x)
-            for d in range(self.act_degree + 1):
-                y = y + weights[:, d, :, :] * factors[0, d, :, :] * x_power
-                x_power = x_power * x
         else:
+            pass
             # weight: [D+1], factors: [D+1]
-            y = torch.zeros_like(x)
-            x_power = torch.ones_like(x)
-            for d in range(self.act_degree + 1):
-                y = y + self.weight[d] * self.factors[d] * x_power
-                x_power = x_power * x
+            # y = torch.zeros_like(x)
+            # x_power = torch.ones_like(x)
+            # for d in range(self.act_degree + 1):
+            #     y = y + self.weight[d] * self.factors[d] * x_power
+            #     x_power = x_power * x
 
         # Apply pixel-wise or scalar mask
         if self.if_pixel:
