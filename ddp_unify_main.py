@@ -114,7 +114,7 @@ def process(pn, args):
         
     model_custom_settings = CustomSettings(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, 
                                            args.prune_1_1_kernel, args.norm_type, args.cheb_params, args.training_use_cheb, 
-                                           args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_k, args.ln_mu, args.ln_norm_type, args.ln_trainable_quad_finetune,
+                                           args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_k, args.ln_mu, args.ln_norm_type, args.act_degree, args.ln_trainable_quad_finetune,
                                            args.ln_quad_coeffs, args.ln_quad_finetune_factors, args.ln_x_scaler, args.ln_group_size, 
                                            args.relu_dropout, args.drop_rate, args.var_norm_scaler)
 
@@ -166,7 +166,7 @@ def process(pn, args):
 
     teacher_custom_settings = CustomSettings(args.teacher_act_relu_type, [0, 0, 0], [0, 0, 0], args.teacher_prune_type, 
                                              args.teacher_prune_1_1_kernel, args.teacher_norm_type, args.cheb_params, args.training_use_cheb, 
-                                             args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_k, args.ln_mu, args.ln_norm_type, args.ln_trainable_quad_finetune,
+                                             args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_k, args.ln_mu, args.ln_norm_type, args.act_degree, args.ln_trainable_quad_finetune,
                                              args.ln_quad_coeffs, args.ln_quad_finetune_factors, args.ln_x_scaler, args.ln_group_size, 
                                              args.relu_dropout, args.drop_rate, args.var_norm_scaler)
 
@@ -699,6 +699,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--ln_k', type=float)
     parser.add_argument('--ln_mu', type=float)
+    parser.add_argument('--act_degree', type=int)
 
     parser.add_argument('--ln_norm_type', type=str, choices=['chw', 'hw'])
 
@@ -796,8 +797,8 @@ if __name__ == "__main__":
     parser.add_argument('--train_subset', type=ast.literal_eval, default=False, help='if train on the 1/13 subset of ImageNet or the full ImageNet')
     parser.add_argument('--pixel_wise', type=ast.literal_eval, default=False, help='if use pixel-wise poly replacement')
     parser.add_argument('--channel_wise', type=ast.literal_eval, default=True, help='if use channel-wise relu_poly class')
-    parser.add_argument('--poly_weight_inits', nargs=3, type=float, default=[0, 1, 0], help='relu_poly weights initial values')
-    parser.add_argument('--poly_weight_factors', nargs=3, type=float, default=[0.1, 1, 1], help='adjust the learning rate of the three weights in relu_poly')
+    parser.add_argument('--poly_weight_inits', nargs='+', type=float, default=[0, 1, 0], help='relu_poly weights initial values')
+    parser.add_argument('--poly_weight_factors', nargs='+', type=float, default=[0.1, 1, 1], help='adjust the learning rate of the three weights in relu_poly')
     parser.add_argument('--poly_weight_min', nargs=3, type=float, default=[0, 0, -0.4])
     parser.add_argument('--poly_weight_max', nargs=3, type=float, default=[0.6, 1.2, 0.6])
 

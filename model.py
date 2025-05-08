@@ -54,26 +54,22 @@ class star_relu(nn.Module):
 
 
 class general_relu_poly(nn.Module):
-    def __init__(self, if_channel, if_pixel, weight_inits, factors, num_channels):
+    def __init__(self, if_channel, if_pixel, weight_inits, factors, act_degree, num_channels):
         super().__init__()
         self.if_channel = if_channel
         self.if_pixel = if_pixel
         self.num_channels = num_channels
         self.rand_mask = None
 
-        # self.weight_a = None
-        # self.weight_b = None
-        # self.weight_c = None
-
         self.weight_inits = weight_inits
+        self.act_degree = act_degree
 
-        if len(weight_inits) != 3:
-            raise ValueError("weight_inits must be of length 3")
-        if len(factors) != 3:
-            raise ValueError("factors must be of length 3")
+        if len(weight_inits) != self.act_degree + 1:
+            raise ValueError("weight_inits must be of length act_degree + 1")
+        if len(factors) != self.act_degree + 1:
+            raise ValueError("factors must be of length act_degree + 1")
         if if_channel:
-            # pass
-            initial_weights = torch.zeros(num_channels, 3)
+            initial_weights = torch.zeros(num_channels, self.act_degree + 1)
             for i, weight_init in enumerate(weight_inits):
                 initial_weights[:, i] = weight_init  
             self.weight = nn.Parameter(initial_weights, requires_grad=True)
@@ -83,40 +79,41 @@ class general_relu_poly(nn.Module):
         self.factors = nn.Parameter(torch.FloatTensor(factors), requires_grad=False)
     
     def forward(self, x, mask):
-        # num_le_zero = torch.le(x, 0).sum().item()
-        # total_num = x.numel()
-        # ratio = num_le_zero / total_num
-        # print(f"The proportion of elements that are less than or equal to 0 is: {ratio:.2f}")
-
         if mask is None or mask == -1:
-            y = F.relu(x)
+            return F.relu(x)
+
+        # Compute polynomial activation
+        if self.if_channel:
+            # weight: [C, act_degree+1] → [C, act_degree+1, 1, 1]
+            weights = self.weight.unsqueeze(-1).unsqueeze(-1)
+            weights = weights.expand(-1, -1, x.size(2), x.size(3))  # [C, D+1, H, W]
+            factors = self.factors.view(1, -1, 1, 1)  # [1, D+1, 1, 1]
+
+            y = torch.zeros_like(x)
+            x_power = torch.ones_like(x)
+            for d in range(self.act_degree + 1):
+                y = y + weights[:, d, :, :] * factors[0, d, :, :] * x_power
+                x_power = x_power * x
         else:
-            # if self.weight_a is None:
-            #     self.weight_a = nn.Parameter(torch.full(x.shape[1:], self.weight_inits[0], device=x.device), requires_grad=True)
-            #     self.weight_b = nn.Parameter(torch.full(x.shape[1:], self.weight_inits[1], device=x.device), requires_grad=True)
-            #     self.weight_c = nn.Parameter(torch.full(x.shape[1:], self.weight_inits[2], device=x.device), requires_grad=True)
+            # weight: [D+1], factors: [D+1]
+            y = torch.zeros_like(x)
+            x_power = torch.ones_like(x)
+            for d in range(self.act_degree + 1):
+                y = y + self.weight[d] * self.factors[d] * x_power
+                x_power = x_power * x
 
-            if self.if_channel:
-                weights = self.weight.unsqueeze(-1).unsqueeze(-1)
-                weights = weights.expand(-1, -1, x.size(2), x.size(3))
-                y = (weights[:, 0, :, :] * self.factors[0] * x + weights[:, 1, :, :] * self.factors[1]) * x + weights[:, 2, :, :] * self.factors[2]
-                
-                # y = (self.weight_a * self.factors[0] * x + self.weight_b * self.factors[1]) * x + self.weight_c * self.factors[2]
+        # Apply pixel-wise or scalar mask
+        if self.if_pixel:
+            if self.rand_mask is None:
+                self.rand_mask = nn.Parameter(torch.rand(x.shape[1:], device=x.device), requires_grad=False)
 
-            else:
-                y = (self.weight[0] * self.factors[0] * x + self.weight[1] * self.factors[1]) * x + self.weight[2] * self.factors[2]
+            if_relu = mask > self.rand_mask
+            y = F.relu(x) * if_relu.float() + y * (1 - if_relu.float())
+        else:
+            y = F.relu(x) * mask + y * (1 - mask)
 
-            if self.if_pixel:
-                if self.rand_mask is None:
-                    self.rand_mask = nn.Parameter(torch.rand(x.shape[1:], device=x.device), requires_grad=False)
-                
-                if_relu = mask > self.rand_mask
-                y = F.relu(x) * if_relu.float() + y * (1 - if_relu.float()) 
-            else:
-                y = F.relu(x) * mask + y * (1 - mask)
-
-        # print("general_relu_poly forward")
         return y
+
     
     def get_relu_density(self, mask):
         if not self.if_pixel:
@@ -131,7 +128,7 @@ class general_relu_poly(nn.Module):
 class BasicBlockPoly(nn.Module):
     expansion = 1
 
-    def __init__(self, in_planes, planes, stride, if_channel, if_pixel, weight_inits, factors, relu2_extra_factor=1):
+    def __init__(self, in_planes, planes, stride, if_channel, if_pixel, weight_inits, factors, act_degree, relu2_extra_factor=1):
         super().__init__()
         self.conv1 = nn.Conv2d(
             in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
@@ -148,10 +145,10 @@ class BasicBlockPoly(nn.Module):
                 nn.BatchNorm2d(self.expansion*planes)
             )
 
-        self.relu1 = general_relu_poly(if_channel, if_pixel, weight_inits, factors, planes)
+        self.relu1 = general_relu_poly(if_channel, if_pixel, weight_inits, factors, act_degree, planes)
         relu2_factors = factors
         relu2_factors[0] = factors[0] * relu2_extra_factor
-        self.relu2 = general_relu_poly(if_channel, if_pixel, weight_inits, relu2_factors, planes)
+        self.relu2 = general_relu_poly(if_channel, if_pixel, weight_inits, relu2_factors, act_degree, planes)
 
     def forward(self, x, mask):
         out = self.conv1(x)
@@ -180,7 +177,7 @@ class BasicBlockPoly(nn.Module):
 
 
 class ResNetPoly(nn.Module):
-    def __init__(self, block, num_blocks, num_classes, if_channel, if_pixel, poly_weight_inits, poly_factors, relu2_extra_factor):
+    def __init__(self, block, num_blocks, num_classes, if_channel, if_pixel, poly_weight_inits, poly_factors, act_degree, relu2_extra_factor):
         super().__init__()
         self.in_planes = 64
 
@@ -188,6 +185,7 @@ class ResNetPoly(nn.Module):
         self.if_pixel = if_pixel
         self.poly_weight_inits = poly_weight_inits
         # self.poly_factors = poly_factors
+        self.act_degree = act_degree
         self.relu2_extra_factor = relu2_extra_factor
 
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
@@ -207,7 +205,7 @@ class ResNetPoly(nn.Module):
 
         self.linear = nn.Linear(512*block.expansion, num_classes)
 
-        self.relu1 = general_relu_poly(if_channel, if_pixel, poly_weight_inits, poly_factors, 64)
+        self.relu1 = general_relu_poly(if_channel, if_pixel, poly_weight_inits, poly_factors, act_degree, 64)
 
         # self.rand_maxpool_mask = None
 
@@ -218,9 +216,9 @@ class ResNetPoly(nn.Module):
         blocks = []
         for stride in strides:
             if planes == 512 and stride == 1:
-                blocks.append(block(self.in_planes, planes, stride, self.if_channel, self.if_pixel, self.poly_weight_inits, poly_factors, self.relu2_extra_factor))
+                blocks.append(block(self.in_planes, planes, stride, self.if_channel, self.if_pixel, self.poly_weight_inits, poly_factors, self.act_degree, self.relu2_extra_factor))
             else:
-                blocks.append(block(self.in_planes, planes, stride, self.if_channel, self.if_pixel, self.poly_weight_inits, poly_factors))
+                blocks.append(block(self.in_planes, planes, stride, self.if_channel, self.if_pixel, self.poly_weight_inits, poly_factors, self.act_degree,))
 
             self.in_planes = planes * block.expansion
         return blocks

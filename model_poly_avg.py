@@ -49,7 +49,7 @@ class custom_relu(nn.Module):
             
             if self.custom_settings.relu_type == "channel":
                 self.relu = general_relu_poly(if_channel=True, if_pixel=False, weight_inits=self.custom_settings.poly_weight_inits, 
-                                              factors=self.custom_settings.poly_factors, num_channels=num_channels)
+                                              factors=self.custom_settings.poly_factors, act_degree=self.custom_settings.act_degree, num_channels=num_channels)
             elif self.custom_settings.relu_type == "fix":
                 self.relu = fix_relu_poly(if_pixel=False, factors=self.custom_settings.poly_factors)
             elif self.custom_settings.relu_type == "star":
