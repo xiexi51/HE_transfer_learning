@@ -50,15 +50,13 @@ class BlockAvgPoly(nn.Module):
         # self.dim_out = dim_out
         # self.act_learn = 1
         # self.stride = stride
-
-        self.keep_bn = keep_bn
         
         self.conv1 = nn.Sequential(
-            Conv2dPruned(custom_settings, dim, dim, kernel_size=3, padding=1),
+            Conv2dPruned(custom_settings, dim, dim, kernel_size=1),
             MyLayerNorm()
         )
         self.conv2 = nn.Sequential(
-            Conv2dPruned(custom_settings, dim, dim_out, kernel_size=3, padding=1),
+            Conv2dPruned(custom_settings, dim, dim_out, kernel_size=1),
             MyLayerNorm()
         )
 
@@ -71,29 +69,9 @@ class BlockAvgPoly(nn.Module):
 
         self.relu = custom_relu(custom_settings)
 
-        self.if_shortcut = if_shortcut
-
-        if self.if_shortcut:
-            # Shortcut connection
-            self.use_pooling = stride != 1 or dim != dim_out
-            if self.use_pooling:
-                self.pooling = nn.AvgPool2d(kernel_size=stride, stride=stride, padding=0)
-            
-            self.adjust_channels = dim != dim_out
-            if self.adjust_channels:
-                self.channel_padding = nn.ConstantPad1d((0, dim_out - dim), 0)  # Only pad the last dim (channels)
-
  
     def forward(self, x, mask, threshold):
         fms = []
-
-        if self.if_shortcut:
-            identity = x
-            if self.use_pooling:
-                identity = self.pooling(identity)
-            if self.adjust_channels:
-                # Pad the channels without adding any parameters
-                identity = F.pad(identity, (0, 0, 0, 0, 0, identity.size(1)), "constant", 0)
 
         out = self.conv1[0](x, threshold)
         out = self.conv1[1](out)
@@ -110,8 +88,6 @@ class BlockAvgPoly(nn.Module):
 
         out = self.pool(out)
 
-        if self.if_shortcut:
-            out += identity  # Add shortcut connection
         
         out, fm = self.act(out, mask, threshold)
 
@@ -135,7 +111,7 @@ class VanillaNetFullUnify(nn.Module):
             MyLayerNorm()
         )
         self.stem2 = nn.Sequential(
-            Conv2dPruned(custom_settings, dims[0], dims[0], kernel_size=3, padding=1, stride=1),
+            Conv2dPruned(custom_settings, dims[0], dims[0], kernel_size=1, stride=1),
             MyLayerNorm(),
             activation_unify(custom_settings, dims[0], act_num)
         )
