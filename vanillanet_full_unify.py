@@ -127,12 +127,25 @@ class VanillaNetFullUnify(nn.Module):
             self.stages.append(stage)
         self.depth = len(strides)
 
-        self.avgpool = nn.AdaptiveAvgPool2d((1,1))
-        self.dropout = nn.Dropout(custom_settings.drop_rate)
+        self.cls1 = nn.Sequential(
+            nn.AdaptiveAvgPool2d((1,1)),
+            nn.Dropout(drop_rate),
+            Conv2dPruned(custom_settings, dims[-1], num_classes, kernel_size=1),
+            MyLayerNorm()
+        )
+        self.cls2 = nn.Sequential(
+            Conv2dPruned(custom_settings, num_classes, num_classes, kernel_size=1)
+        )
 
-        self.linear = nn.Linear(dims[-1], num_classes)
+
+        # self.avgpool = nn.AdaptiveAvgPool2d((1,1))
+        # self.dropout = nn.Dropout(custom_settings.drop_rate)
+
+        # self.linear = nn.Linear(dims[-1], num_classes)
 
         self.stem_relu = custom_relu(custom_settings)
+
+        self.cls_relu = custom_relu(custom_settings)
         
         self.apply(self._init_weights)
 
@@ -165,12 +178,19 @@ class VanillaNetFullUnify(nn.Module):
 
         featuremap = x
 
-        x = self.avgpool(x)
+        # x = self.avgpool(x)
 
-        x = self.dropout(x)
+        # x = self.dropout(x)
+
+        x = self.cls1[0:2](x)
+        x = self.cls1[2](x, threshold)
+        x = self.cls1[3](x)
+        x = self.cls_relu(x)
+        x = self.cls2[0](x, threshold)
+
 
         x = x.view(x.size(0), -1)
-        x = self.linear(x)
+        # x = self.linear(x)
 
         # fms.append(x)
 
