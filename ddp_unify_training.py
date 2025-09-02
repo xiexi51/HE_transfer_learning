@@ -21,16 +21,13 @@ def set_forward_with_fms(model, if_forward_with_fms):
     else:
         model.if_forward_with_fms = if_forward_with_fms
 
-def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Module, model_t: torch.nn.Module, optimizer: torch.optim.Optimizer, 
+def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Module, optimizer: torch.optim.Optimizer, 
               epoch: int, mask: Tuple[float, float], writer: SummaryWriter, world_pn: int, omit_fms: int, mixup_fn: Mixup, criterion_ce: torch.nn.Module, 
               max_norm: float, update_freq: int, model_ema: List[ModelEma], act_learn: float, threshold_end: float, undo_grad: bool):
     if args.student_eval:
         model_s.eval()
     else:
         model_s.train()
-
-    if model_t is not None:
-        model_t.eval()
 
     train_loss = 0
     train_loss_kd = 0
@@ -118,13 +115,6 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
             x, y = mixup_fn(x, y)
         
         with torch.amp.autocast(device_type='cuda', enabled=args.use_amp, dtype=amp_dtype):
-            if model_t is not None and (args.loss_conv_prune_factor > 0 or args.loss_fm_factor > 0 or args.loss_kd_factor > 0):
-                with torch.no_grad():
-                    set_forward_with_fms(model_t, True)
-                    if args.loss_conv_prune_factor > 0:
-                        out_t, fms_t, featuremap_t = model_t((x, -1, 1))
-                    else:
-                        out_t, fms_t, featuremap_t = model_t((x, -1, 1))
             if args.v_type != "demo" and args.v_type.isdigit() and not int(args.v_type) >= 18:
                 set_forward_with_fms(model_s, True)
                 if mask is not None:
@@ -178,15 +168,7 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
 
             if args.loss_conv_prune_factor > 0:    
                 loss_conv = active_conv_rate * args.loss_conv_prune_factor
-                loss += loss_conv
-
-            if args.loss_fm_factor > 0:
-                loss_fm = sum(loss_fm_fun(x, y) for x, y in zip(fms_s[omit_fms:], fms_t[omit_fms:])) * args.loss_fm_factor
-                loss += loss_fm
-            if args.loss_kd_factor > 0:
-                # loss_kd = criterion_kd(out_s, out_t) * args.loss_kd_factor
-                loss_kd = criterion_kd(featuremap_s, featuremap_t) * args.loss_kd_factor
-                loss += loss_kd
+                loss += loss_conv 
 
             if args.loss_ce_factor > 0:
                 loss_ce = criterion_ce(out_s, y) * args.loss_ce_factor
@@ -206,10 +188,6 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
                 train_loss_var += loss_var.item()
         if args.loss_conv_prune_factor > 0:
             train_loss_conv += loss_conv.item()
-        if args.loss_fm_factor > 0:
-            train_loss_fm += loss_fm.item()
-        if args.loss_kd_factor > 0:
-            train_loss_kd += loss_kd.item()
         if args.loss_ce_factor > 0:
             train_loss_ce += loss_ce.item()
 

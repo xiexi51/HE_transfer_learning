@@ -1,12 +1,10 @@
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-
 import os
 import timm
 import timm.optim
 from timm.data import Mixup
-from timm.utils import ModelEma
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy, BinaryCrossEntropy
 import torch
 import torch.optim as optim
@@ -23,25 +21,16 @@ from torch.utils.data.distributed import DistributedSampler
 import torch.multiprocessing as mp
 import torch.distributed as dist
 from utils_dataset import build_dataset
-from vanillanet_deploy_poly import VanillaNet_deploy_poly
 from vanillanet_full_unify import vanillanet_5_full_unify, vanillanet_6_full_unify, vanillanet_7_full_unify, VanillaNetFullUnify
-from model_poly_avg import ResNet18AvgCustom, ResNetAvgCustom, custom_relu
+from model_poly_avg import custom_relu, get_act_statistics
 from model import initialize_resnet
 # from locals import proj_root
 import setproctitle
 import sys
-from torchvision import models
 from demonet import DemoNet
 from utils import CustomSettings
 from my_layer_norm import MyLayerNorm, get_ln_statistics
-from model_poly_avg import get_act_statistics, get_norm_statistics2
 from resnet import ResNet18, ResNet34, ResNet50
-from vgg import my_vgg19
-
-def adjust_learning_rate(optimizer, epoch, init_lr, lr_step_size, lr_gamma):
-    lr = init_lr * (lr_gamma ** (epoch // lr_step_size))
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
 
 def distributed_print(rank, world_size, message):
     # Gather messages from all ranks
@@ -137,12 +126,6 @@ def process(pn, args):
                 module.setup(model_custom_settings)
                 last_mylayernorm = module
 
-        # if last_mylayernorm is not None:
-        #     last_mylayernorm.norm_type = 'batchnorm'
-
-    # elif args.v_type == "18":
-    #     model = ResNet18AvgCustom(model_custom_settings, args.if_wide)
-    #     initialize_resnet(model)
     elif args.v_type in ["18", "34", "50"]:
         if args.v_type == "18":
             model = ResNet18(num_classes)
@@ -155,39 +138,8 @@ def process(pn, args):
 
         initialize_resnet(model)
 
-        # model.load_state_dict(models.resnet34(weights=models.resnet.ResNet34_Weights.DEFAULT).state_dict(), strict=True)
-    
-    elif args.v_type in ["v19"]:
-        model = my_vgg19(pretrained=False)
-        replace_modules(model, model_custom_settings)
-
     else:
         model = DemoNet(depth=10, dim=224, mode="mul")
-
-    teacher_custom_settings = CustomSettings(args.teacher_act_relu_type, [0, 0, 0], [0, 0, 0], args.teacher_prune_type, 
-                                             args.teacher_prune_1_1_kernel, args.teacher_norm_type, args.cheb_params, args.training_use_cheb, 
-                                             args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_k, args.ln_mu, args.ln_norm_type, args.act_degree, args.ln_trainable_quad_finetune,
-                                             args.ln_quad_coeffs, args.ln_quad_finetune_factors, args.ln_x_scaler, args.ln_group_size, 
-                                             args.relu_dropout, args.drop_rate, args.var_norm_scaler)
-
-    if args.teacher_file is not None:
-        if args.v_type in ["5", "6", "7"]:
-            model_t = vanillanet(teacher_custom_settings, if_shortcut=args.vanilla_shortcut, keep_bn=args.vanilla_keep_bn) 
-        elif args.v_type == "18":
-            model_t = ResNet18AvgCustom(teacher_custom_settings, args.if_wide)
-            
-            
-        print(f"Loading teacher: {args.teacher_file}")     
-        state_dict = torch.load(args.teacher_file)['model_state_dict']
-        new_state_dict = {}
-        for key, value in state_dict.items():
-            new_key = re.sub(r'layer(\d+)_(\d+)', r'layer\1.\2', key)
-            new_key = re.sub(r'(\.relu)(\d+)\.', r'\1\2.relu.', new_key)
-            new_key = re.sub(r'(^relu)(\d+)\.', r'\1\2.relu.', new_key)
-            new_state_dict[new_key] = value
-        model_t.load_state_dict(new_state_dict, strict=False)
-    else:
-        model_t = None
     
     if args.v_type != "demo" :
         dummy_input = torch.rand(10, 3, 224, 224)
@@ -238,58 +190,9 @@ def process(pn, args):
         else:
             print(f"No checkpoint found at {checkpoint_path}")
 
-    assert not ((args.freeze_linear or args.freeze_relu) and args.freeze_base), "(freeze_linear or freeze_relu), and freeze_base cannot be true at the same time."
-
-    if args.freeze_linear:
-        for param in model.linear.parameters():
-            param.requires_grad = False
-    if args.freeze_relu:
-        for name, param in model.named_parameters():
-            if name.endswith('.relu.weight'):
-                param.requires_grad = False
-
-    if args.freeze_base:
-        # assert args.student_eval, "base model should be set to bn eval in transfer learning"
-        for name, param in model.named_parameters():
-            param.requires_grad = False
-
-    if args.num_layers_to_unfreeze > 0:
-        if isinstance(model, VanillaNetFullUnify):
-            layers_to_unfreeze = [
-                    model.stages[-1].conv1,
-                    model.stages[-1].relu,
-                    model.stages[-1].conv2,
-                    model.stages[-1].act,
-                    model.linear
-                ]        
-        elif isinstance(model, ResNetAvgCustom):
-            layers_to_unfreeze = [
-                model.layer4[-1].shortcut,
-                model.layer4[-1].conv1,
-                model.layer4[-1].bn1,
-                model.layer4[-1].relu1,
-                model.layer4[-1].conv2,
-                model.layer4[-1].bn2,
-                model.layer4[-1].relu2,
-                model.linear
-            ]
-
-        for layer in layers_to_unfreeze[-args.num_layers_to_unfreeze:]:
-            print(f"unfreeze {layer}")
-            for name, param in layer.named_parameters():
-                if not name.endswith("rand_mask"):
-                    param.requires_grad = True
-
-    # if args.loss_conv_prune_factor == 0:
-    #     for name, module in model.named_modules():
-    #         if isinstance(module, Conv2dPruned):
-    #             if hasattr(module, 'weight_aux') and module.weight_aux is not None:
-    #                 module.weight_aux.requires_grad = False
 
     model = model.cuda()
 
-    if model_t is not None:
-        model_t = model_t.cuda()
 
     # model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = DistributedDataParallel(model, device_ids=[pn])
@@ -432,21 +335,12 @@ def process(pn, args):
                 module.mask = _mask_begin
         
         if True or args.world_size > 1:
-            # ddp_test(args, testloader, model_t, _test_epoch, best_acc, -1, writer, pn)
             ddp_test(args, testloader, model, _test_epoch, best_acc, _mask_begin, writer, pn, 1)
 
             # if pn == 0:
             #     model.module.get_ln_statistics(0, f"{log_dir}/var.txt")
 
-        return
-
-    # if pn == 0:
-    #     print("test model_t:")
-    #     _, _ = single_test(args, single_testloader, model_t, 0, 0, -1)
-    # dist.barrier()
-        
-    # start_epoch = 300
-    # args.total_epochs = 500
+        return    
 
     torch.cuda.empty_cache()
 
@@ -457,16 +351,7 @@ def process(pn, args):
 
     recent_checkpoints = []
 
-    # if args.use_amp and args.bf16:
-    #     for module in model.module.modules():
-    #         if isinstance(module, MyLayerNorm):
-    #             module.running_var_mean = module.running_var_mean.to(torch.bfloat16)
-
-    # torch.autograd.set_detect_anomaly(True)
-
     for epoch in range(start_epoch, args.total_epochs):
-        if args.lr_step_size > 0:
-            adjust_learning_rate(optimizer, epoch, args.lr, args.lr_step_size, args.lr_gamma)
         
         if epoch == 0:
             for param_group in optimizer.param_groups:
@@ -506,33 +391,17 @@ def process(pn, args):
                     module.filter_var_mean = args.filter_var_mean
 
         act_learn = 0
-
-        # mask = 1
-
-        if pn == 0 and False:
-            if mask is not None:
-                print("mask = ", mask)
-                writer.add_scalar('mask_end value', mask_end, epoch)
-                print("threshold_end = ", threshold_end)
-                writer.add_scalar('threshold_end value', threshold_end, epoch)
-            if isinstance(model.module, VanillaNetFullUnify) and args.act_relu_type != "relu" and args.pixel_wise:
-                total_elements, relu_elements = model.module.get_relu_density(mask_end)
-                print(f"total_elements {total_elements}, relu_elements {relu_elements}, density = {relu_elements/total_elements}")
         
         omit_fms = 0
         if args.undo_grad_epoch != -1 and epoch >= args.undo_grad_epoch and args.undo_grad_threshold < 1:
             undo_grad = True
         else:
             undo_grad = False
-        train_acc, avg_l2_norm = ddp_unify_train(args=args, trainloader=trainloader, model_s=model, model_t=model_t, optimizer=optimizer, epoch=epoch, 
+        train_acc, avg_l2_norm = ddp_unify_train(args=args, trainloader=trainloader, model_s=model, optimizer=optimizer, epoch=epoch, 
                                       mask=mask, writer=writer, world_pn=world_pn, omit_fms=omit_fms, mixup_fn=mixup_fn, criterion_ce=criterion_ce, 
                                       max_norm=None, update_freq=args.update_freq, model_ema=None, act_learn=act_learn, threshold_end=threshold_end, undo_grad=undo_grad)
         
         # print('avg_l2_norm = ', avg_l2_norm)
-
-        if pn == 0:
-            get_act_statistics(model.module, epoch, f"{log_dir}/act_stats.txt")
-            get_norm_statistics2(model.module, epoch, f"{log_dir}/norm_stats2")
 
         if True or mask_begin < 0.01:
             if mask is not None:
@@ -731,7 +600,7 @@ if __name__ == "__main__":
     parser.add_argument('--teacher_prune_type', type=str, default='None', choices=['group_pixel', 'channel', 'pixel', 'fixed_channel', 'None'])
     parser.add_argument('--prune_1_1_kernel', type=ast.literal_eval, default=False)
     parser.add_argument('--teacher_prune_1_1_kernel', type=ast.literal_eval, default=False)
-    parser.add_argument('--norm_type', type=str, default='layernorm', choices=['my_layernorm', 'layernorm', 'batchnorm'])
+    parser.add_argument('--norm_type', type=str, default='my_layernorm', choices=['my_layernorm', 'layernorm', 'batchnorm'])
     parser.add_argument('--teacher_norm_type', type=str, default='layernorm', choices=['my_layernorm', 'layernorm', 'batchnorm'])
 
     parser.add_argument('--freeze_linear', type=ast.literal_eval, default=False)
