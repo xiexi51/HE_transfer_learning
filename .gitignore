@@ -11,3 +11,4 @@ ip_list
 /success_*
 /pruned_*
 core.*
+/tiny-imagenet*
