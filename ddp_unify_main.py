@@ -31,6 +31,8 @@ from demonet import DemoNet
 from utils import CustomSettings
 from my_layer_norm import MyLayerNorm, get_ln_statistics
 from resnet import ResNet18, ResNet34, ResNet50
+from util_tiny_imagenet import build_tiny_imagenet_dataset, _download_and_prepare_tiny_imagenet
+from poly_vit import replace_vit_with_poly_attention
 
 def distributed_print(rank, world_size, message):
     # Gather messages from all ranks
@@ -66,8 +68,6 @@ def process(pn, args):
     torch.cuda.set_device(pn)
     process_group = torch.distributed.init_process_group(backend="nccl", init_method=f'tcp://{args.master_ip}:{args.master_port}', world_size=args.world_size, rank=world_pn)
 
-    # distributed_print(world_pn, dist.get_world_size(), f"Process {world_pn} started")
-
     torch.manual_seed(10)
     torch.cuda.manual_seed_all(10)
     start_epoch = 0  # start from epoch 0 or last checkpoint epoch
@@ -78,17 +78,23 @@ def process(pn, args):
 
     print("gpu count =", torch.cuda.device_count())
     
-    trainset = build_dataset(args.dataset, is_train=True, if_download=False, args=args)
+    if args.dataset == "tiny_imagenet":
+        trainset = build_tiny_imagenet_dataset(is_train=True, args=args)
+        testset  = build_tiny_imagenet_dataset(is_train=False, args=args)
+    else:
+        trainset = build_dataset(args.dataset, is_train=True, if_download=False, args=args)
+        testset  = build_dataset(args.dataset, is_train=False, if_download=False, args=args)
     train_sampler = DistributedSampler(trainset, num_replicas=args.world_size, rank=world_pn)
-    trainloader = torch.utils.data.DataLoader(trainset, sampler=train_sampler, batch_size=args.batch_size_train, num_workers=args.num_train_loader_workers, pin_memory=True, shuffle=False, drop_last=True)
-    testset = build_dataset(args.dataset, is_train=False, if_download=False, args=args)
-    test_sampler = DistributedSampler(testset, num_replicas=args.world_size, rank=world_pn)
+    test_sampler  = DistributedSampler(testset,  num_replicas=args.world_size, rank=world_pn)
     single_test_sampler = torch.utils.data.SequentialSampler(testset)
+    trainloader = torch.utils.data.DataLoader(trainset, sampler=train_sampler, batch_size=args.batch_size_train, num_workers=args.num_train_loader_workers, pin_memory=True, shuffle=False, drop_last=True)
     testloader = torch.utils.data.DataLoader(testset, sampler=test_sampler, batch_size=args.batch_size_test, num_workers=args.num_test_loader_workers, pin_memory=True, shuffle=False, drop_last=False)
     single_testloader = torch.utils.data.DataLoader(testset, sampler=single_test_sampler, batch_size=args.batch_size_test, num_workers=args.num_test_loader_workers, drop_last=False)
 
     if args.dataset == "cifar10":
         num_classes = 10
+    elif args.dataset == "tiny_imagenet":
+        num_classes = 200
     else:
         num_classes = 1000
 
@@ -138,13 +144,17 @@ def process(pn, args):
 
         initialize_resnet(model)
 
+    elif args.v_type == "vit":
+        vit_name = args.vit_model
+        model = timm.create_model(vit_name, pretrained=False, num_classes=num_classes)
+        # model = replace_vit_with_poly_attention(model)
     else:
         model = DemoNet(depth=10, dim=224, mode="mul")
     
     if args.v_type != "demo" :
         dummy_input = torch.rand(10, 3, 224, 224)
         model.eval()
-        if args.v_type == "v19" or args.v_type == "18":
+        if args.v_type == "v19" or args.v_type == "18" or args.v_type == "vit":
             model(dummy_input)
         else:
             model((dummy_input, 0, 1))
@@ -553,7 +563,7 @@ if __name__ == "__main__":
     parser.add_argument('--act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix', 'star'])
     parser.add_argument('--teacher_act_relu_type', type=str, default="relu", choices = ['relu', 'channel', 'fix', 'star'])
 
-    parser.add_argument('--v_type', type=str, default="18", choices = ["5", "6", "7", "18", "34", "50", "demo", "v19"])
+    parser.add_argument('--v_type', type=str, default="18", choices = ["5", "6", "7", "18", "34", "50", "demo", "v19", "vit"])
     parser.add_argument('--old_version', type=ast.literal_eval, default=False)
 
     parser.add_argument('--cheb_params', nargs=3, type=float, default=[4, 0.1, 5], help='degree, a, b')
@@ -616,7 +626,9 @@ if __name__ == "__main__":
     parser.add_argument('--threshold_min', type=float, default=0)
     
     parser.add_argument('--build_dataset_old', type=ast.literal_eval, default=False)
-    parser.add_argument('--dataset', type=str, default='imagenet', choices=['imagenet', 'cifar10', 'cifar100'])
+    parser.add_argument('--dataset', type=str, default='imagenet', choices=['imagenet', 'cifar10', 'cifar100', 'tiny_imagenet'])
+    parser.add_argument('--tiny_imagenet_path', type=str, default=None, help='Root directory of tiny-imagenet-200')
+    parser.add_argument('--vit_model', type=str, default='vit_tiny_patch16_224', help='timm ViT model name')
     parser.add_argument('--copy_model_every_epoch', type=int, default=0)
     parser.add_argument('--data_augment', type=ast.literal_eval, default=False)
 
@@ -781,6 +793,13 @@ if __name__ == "__main__":
     if args.dataset == 'cifar10':
         build_dataset(args.dataset, is_train=True, if_download=True, args=args)
         build_dataset(args.dataset, is_train=False, if_download=True, args=args)
+
+    if args.dataset == 'tiny_imagenet':
+        # Auto download & prepare if path is missing or not ready
+        root = args.tiny_imagenet_path or os.path.abspath("./tiny-imagenet-200")
+        if not (os.path.isdir(os.path.join(root, "train")) and os.path.isdir(os.path.join(root, "val"))):
+            _download_and_prepare_tiny_imagenet(root)
+        args.tiny_imagenet_path = root
 
     mp.spawn(process, nprocs=args.node_gpu_count, args=(args, ))
     
