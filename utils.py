@@ -97,7 +97,7 @@ def change_print_for_distributed(is_master):
 
 class CustomSettings:
     def __init__(self, relu_type, poly_weight_inits, poly_factors, prune_type, prune_1_1_kernel, norm_type, cheb_params, 
-                 training_use_cheb, var_norm_boundary, ln_momentum, ln_use_quad, ln_k, ln_mu, ln_norm_type, act_degree, ln_trainable_quad_finetune, ln_quad_coeffs, 
+                 training_use_cheb, var_norm_boundary, ln_momentum, ln_use_quad, k, mu, ln_norm_type, act_degree, ln_trainable_quad_finetune, ln_quad_coeffs, 
                  ln_quad_finetune_factors, ln_x_scaler, ln_group_size, relu_dropout, drop_rate, var_norm_scaler):
         self.relu_type = relu_type
         self.poly_weight_inits = poly_weight_inits
@@ -111,8 +111,8 @@ class CustomSettings:
         self.ln_momentum = ln_momentum
         self.ln_use_quad = ln_use_quad
 
-        self.ln_k = ln_k
-        self.ln_mu = ln_mu
+        self.k = k
+        self.mu = mu
         self.ln_norm_type = ln_norm_type
         self.act_degree = act_degree
 

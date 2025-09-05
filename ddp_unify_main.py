@@ -29,10 +29,10 @@ import setproctitle
 import sys
 from demonet import DemoNet
 from utils import CustomSettings
-from my_layer_norm import MyLayerNorm, get_ln_statistics
+# from my_layer_norm import get_ln_statistics
 from resnet import ResNet18, ResNet34, ResNet50
 from util_tiny_imagenet import build_tiny_imagenet_dataset, _download_and_prepare_tiny_imagenet
-from poly_vit import replace_vit_with_poly_attention
+from poly_vit import replace_vit_attention, PolyNorm, poly_act
 
 def distributed_print(rank, world_size, message):
     # Gather messages from all ranks
@@ -51,10 +51,11 @@ def replace_modules(model, model_custom_settings, i=0):
         else:
             if isinstance(module, torch.nn.MaxPool2d):
                 setattr(model, name, torch.nn.AvgPool2d(module.kernel_size, module.stride, module.padding))
-            if isinstance(module, torch.nn.ReLU):
-                setattr(model, name, custom_relu(model_custom_settings))
-            if isinstance(module, torch.nn.BatchNorm2d):
-                my_layer_norm = MyLayerNorm()
+            if isinstance(module, torch.nn.ReLU) or isinstance(module, torch.nn.GELU):
+                setattr(model, name, poly_act(model_custom_settings.poly_weight_inits, model_custom_settings.poly_factors, 
+                                              model_custom_settings.act_degree, model_custom_settings.relu_dropout))
+            if isinstance(module, torch.nn.BatchNorm2d) or isinstance(module, torch.nn.LayerNorm):
+                my_layer_norm = PolyNorm()
                 my_layer_norm.number = i
                 my_layer_norm.setup(model_custom_settings)
                 setattr(model, name, my_layer_norm)
@@ -109,7 +110,7 @@ def process(pn, args):
         
     model_custom_settings = CustomSettings(args.act_relu_type, args.poly_weight_inits, args.poly_weight_factors, args.prune_type, 
                                            args.prune_1_1_kernel, args.norm_type, args.cheb_params, args.training_use_cheb, 
-                                           args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.ln_k, args.ln_mu, args.ln_norm_type, args.act_degree, args.ln_trainable_quad_finetune,
+                                           args.var_norm_boundary, args.ln_momentum, args.ln_use_quad, args.k, args.mu, args.ln_norm_type, args.act_degree, args.ln_trainable_quad_finetune,
                                            args.ln_quad_coeffs, args.ln_quad_finetune_factors, args.ln_x_scaler, args.ln_group_size, 
                                            args.relu_dropout, args.drop_rate, args.var_norm_scaler)
 
@@ -126,7 +127,7 @@ def process(pn, args):
         last_mylayernorm = None
         _i = 0
         for module in model.modules():
-            if isinstance(module, MyLayerNorm):
+            if isinstance(module, PolyNorm):
                 module.number = _i
                 _i += 1
                 module.setup(model_custom_settings)
@@ -147,7 +148,9 @@ def process(pn, args):
     elif args.v_type == "vit":
         vit_name = args.vit_model
         model = timm.create_model(vit_name, pretrained=False, num_classes=num_classes)
-        # model = replace_vit_with_poly_attention(model)
+        if args.attn_type != 'original':
+            model = replace_vit_attention(model, args.attn_type)
+            replace_modules(model, model_custom_settings)
     else:
         model = DemoNet(depth=10, dim=224, mode="mul")
     
@@ -341,7 +344,7 @@ def process(pn, args):
         for module in model.module.modules():
             if isinstance(module, custom_relu):
                 module.mask = _mask_begin
-            if isinstance(module, MyLayerNorm):
+            if isinstance(module, PolyNorm):
                 module.mask = _mask_begin
         
         if True or args.world_size > 1:
@@ -380,7 +383,7 @@ def process(pn, args):
             if isinstance(module, custom_relu):
                 module.mask = mask_begin
                 module.reset_stats()
-            if isinstance(module, MyLayerNorm):
+            if isinstance(module, PolyNorm):
                 module.mask = mask_begin
 
         threshold = threshold_provider.get_mask(epoch)
@@ -392,12 +395,12 @@ def process(pn, args):
             args.loss_var1_factor = store_loss_var1_factor
             args.loss_var2_factor = store_loss_var2_factor
             for module in model.module.modules():
-                if isinstance(module, MyLayerNorm):
+                if isinstance(module, PolyNorm):
                     module.use_running_var_mean = True
         
         if args.filter_var_mean_epoch >= 0 and epoch >= args.filter_var_mean_epoch:
             for module in model.module.modules():
-                if isinstance(module, MyLayerNorm):
+                if isinstance(module, PolyNorm):
                     module.filter_var_mean = args.filter_var_mean
 
         act_learn = 0
@@ -420,12 +423,12 @@ def process(pn, args):
                 test_acc = ddp_test(args, testloader, model, epoch, best_acc, None, writer, world_pn, threshold_end)
         
         if pn == 0:
-            get_ln_statistics(model.module, epoch, f"{log_dir}/var.txt")
+            # get_ln_statistics(model.module, epoch, f"{log_dir}/var.txt")
             get_act_statistics(model.module, epoch, f"{log_dir}/act_stats.txt")
             
 
         for layer in model.module.modules():
-            if isinstance(layer, MyLayerNorm):
+            if isinstance(layer, PolyNorm):
                 # layer.save_counts_to_total()
                 layer.epoch_train_var_mean = 0
                 layer.epoch_train_var_sum = 0
@@ -576,8 +579,8 @@ if __name__ == "__main__":
     parser.add_argument('--ln_quad_coeffs', nargs=3, type=float, default=[0.01, 10, 0.07])
     parser.add_argument('--ln_quad_finetune_factors', nargs=3, type=float, default=[0.0001, 0.1, 0.001])
 
-    parser.add_argument('--ln_k', type=float)
-    parser.add_argument('--ln_mu', type=float)
+    parser.add_argument('--k', type=float)
+    parser.add_argument('--mu', type=float)
     parser.add_argument('--act_degree', type=int)
 
     parser.add_argument('--ln_norm_type', type=str, choices=['chw', 'hw'])
@@ -629,6 +632,8 @@ if __name__ == "__main__":
     parser.add_argument('--dataset', type=str, default='imagenet', choices=['imagenet', 'cifar10', 'cifar100', 'tiny_imagenet'])
     parser.add_argument('--tiny_imagenet_path', type=str, default=None, help='Root directory of tiny-imagenet-200')
     parser.add_argument('--vit_model', type=str, default='vit_tiny_patch16_224', help='timm ViT model name')
+    parser.add_argument('--attn_type', type=str, choices=['poly_kernel', 'quad_kernel', 'pos_kernel', 'original'])
+
     parser.add_argument('--copy_model_every_epoch', type=int, default=0)
     parser.add_argument('--data_augment', type=ast.literal_eval, default=False)
 

@@ -13,7 +13,7 @@ from timm.data import Mixup
 from timm.utils import ModelEma
 from vanillanet_deploy_poly import VanillaNet_deploy_poly
 from typing import Tuple
-from my_layer_norm import MyLayerNorm
+from poly_vit import PolyNorm
 
 def set_forward_with_fms(model, if_forward_with_fms):
     if isinstance(model, DistributedDataParallel):
@@ -145,7 +145,7 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
             #     break
 
             for name, module in model_s.module.named_modules():
-                if isinstance(module, MyLayerNorm) and module.norm_type == "my_layernorm":
+                if isinstance(module, PolyNorm):
                     dist.all_reduce(module.running_var_mean, op=dist.ReduceOp.SUM)
                     module.running_var_mean /= dist.get_world_size()
                     filtered += module.filter_var_mean_times
@@ -155,9 +155,9 @@ def ddp_unify_train(args: Namespace, trainloader: Iterable, model_s: torch.nn.Mo
             if args.loss_var1_factor > 0 or args.loss_var2_factor > 0:
                 loss_var = 0
                 for name, module in model_s.module.named_modules():
-                    if isinstance(module, MyLayerNorm) and module.norm_type == "my_layernorm":
+                    if isinstance(module, PolyNorm):
                         var_ratio = (module.saved_var_mean / module.running_var_mean)
-                        loss_var += (var_ratio - 1).pow(2).mean() * args.loss_var2_factor + var_ratio.mean() / module.group_num * args.loss_var1_factor
+                        loss_var += (var_ratio - 1).pow(2).mean() * args.loss_var2_factor + var_ratio.mean() * args.loss_var1_factor
                 loss += loss_var
 
             if args.v_type != "demo" and args.v_type.isdigit() and not int(args.v_type) >= 18:
