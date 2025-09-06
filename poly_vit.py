@@ -370,32 +370,28 @@ class PolyNorm(nn.Module):
     def forward(self, x: torch.Tensor):
         assert self.is_setup, "MyLayerNorm needs to be explicitly setup before forward pass."
 
-        # ---- 仅修改的地方 1：确定 ViT 的 normalized_shape 为最后一维（hidden_dim） ----
-        dims = tuple(range(x.ndim - 1))   # 除了最后一维的所有维度
         if self.normalized_shape is None:
             self.normalized_shape = x.size()[1:]
-
-        # 初始化缓冲与仿射参数（与 ViT 的 LayerNorm 相同的形状：最后一维）
-        if not hasattr(self, 'running_var_mean'):
-            self.register_buffer('running_var_mean', torch.ones(x.size()[-1]))
-            if self.elementwise_affine:
-                self.gain = nn.Parameter(torch.ones(self.normalized_shape))
-                self.bias = nn.Parameter(torch.zeros(self.normalized_shape))
 
         exponential_average_factor = 0.0
         if self.training:
             self.num_batches_tracked += 1
             exponential_average_factor = 1.0 / float(self.num_batches_tracked)
-
-        # ---- 仅修改的地方 2：在最后一维（embedding 维）上做归一化统计 ----
-        # x 形状通常为 [B, T, D] 或 [B, D]，在 dim=-1 上求均值/方差
+        
+        dims = tuple(range(1, x.ndim))
         
         mean = x.mean(dim=dims, keepdim=True)
         mean_x2 = (x ** 2).mean(dim=dims, keepdim=True)
 
-        var = mean_x2 - mean ** 2  # 形状与 mean 相同（..., 1）
+        var = mean_x2 - mean ** 2  
 
-        var_mean = var.squeeze()
+        var_mean = var.mean().squeeze()
+
+        if not hasattr(self, 'running_var_mean'):
+            self.register_buffer('running_var_mean', torch.ones_like(var_mean))
+            if self.elementwise_affine:
+                self.gain = nn.Parameter(torch.ones(self.normalized_shape))
+                self.bias = nn.Parameter(torch.zeros(self.normalized_shape))
 
         self.saved_var_mean = var_mean
 
@@ -419,13 +415,14 @@ class PolyNorm(nn.Module):
             else:
                 final_var_mean = _running_var_mean
 
-            v = var / final_var_mean  # 仍为标量标定（广播到所有 token/特征）
+            v = var / final_var_mean   
 
             f_result = torch.sqrt(1 / (self.mu * v))
             g_result = (v - self.k) ** 2 * self.g_2 + self.g_3
 
             if self.training :
                 g_result[v > self.k] = f_result[v > self.k]
+                # g_result[v > self.k] = self.g_3
                 ratio = (v > self.k).float().mean()
                 self.filter_var_mean_times = ratio.item()
 

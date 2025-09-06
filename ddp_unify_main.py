@@ -148,8 +148,10 @@ def process(pn, args):
     elif args.v_type == "vit":
         vit_name = args.vit_model
         model = timm.create_model(vit_name, pretrained=False, num_classes=num_classes)
-        if args.attn_type != 'original':
-            model = replace_vit_attention(model, args.attn_type)
+        if args.vit_attn_type != 'original':
+            model = replace_vit_attention(model, attn_type=args.vit_attn_type, pos_type=args.vit_pos_type, use_psd_square=args.vit_use_psd_square, 
+                                          c0=args.vit_quad_c[0], c1=args.vit_quad_c[1], c2=args.vit_quad_c[2])
+        if args.vit_replace_modules == True:
             replace_modules(model, model_custom_settings)
     else:
         model = DemoNet(depth=10, dim=224, mode="mul")
@@ -631,8 +633,27 @@ if __name__ == "__main__":
     parser.add_argument('--build_dataset_old', type=ast.literal_eval, default=False)
     parser.add_argument('--dataset', type=str, default='imagenet', choices=['imagenet', 'cifar10', 'cifar100', 'tiny_imagenet'])
     parser.add_argument('--tiny_imagenet_path', type=str, default=None, help='Root directory of tiny-imagenet-200')
+
     parser.add_argument('--vit_model', type=str, default='vit_tiny_patch16_224', help='timm ViT model name')
-    parser.add_argument('--attn_type', type=str, choices=['poly_kernel', 'quad_kernel', 'pos_kernel', 'original'])
+    parser.add_argument('--vit_attn_type', type=str, choices=['poly_kernel', 'quad_kernel', 'pos_kernel', 'original'])
+
+    # Common
+    parser.add_argument("--vit_replace_modules", type=ast.literal_eval, default=True)
+    parser.add_argument("--vit_bias", type=ast.literal_eval, default=True, help="Whether to use bias in attention")
+    parser.add_argument("--vit_proj_drop", type=float, default=0.0, help="Dropout rate for projection")
+    # PolyKernelAttentionTimmCompat
+    parser.add_argument("--vit_degree", type=int, default=2, help="Degree of polynomial kernel")
+    parser.add_argument("--vit_alpha", type=float, default=1.0, help="Alpha coefficient for polynomial kernel")
+    parser.add_argument("--vit_beta", type=float, default=1.0, help="Beta coefficient for polynomial kernel")
+    parser.add_argument("--vit_average_by_len", type=ast.literal_eval, default=True, help="Whether to normalize attention by sequence length")
+    # LinearPositionalAttention
+    parser.add_argument("--vit_pos_type", type=str, default="absolute", choices=["absolute", "relative"])
+    parser.add_argument("--vit_max_len", type=int, default=2048)
+    parser.add_argument("--vit_use_layernorm", type=ast.literal_eval, default=True, help="Whether to use LayerNorm in attention")
+    # QuadKernelAttention
+    parser.add_argument("--vit_use_psd_square", type=ast.literal_eval, default=True, help="Whether to use PSD square")
+    parser.add_argument("--vit_quad_c", nargs="+", type=float, default=[1.0, 1.0, 0.1], help="Coefficients [c0, c1, c2] for quad kernel")
+    parser.add_argument("--vit_scale_by_len", type=ast.literal_eval, default=True, help="Whether to scale by sequence length") 
 
     parser.add_argument('--copy_model_every_epoch', type=int, default=0)
     parser.add_argument('--data_augment', type=ast.literal_eval, default=False)
@@ -697,8 +718,6 @@ if __name__ == "__main__":
     # parser.add_argument('--act_learn_mini_batch', type=ast.literal_eval, default=True)
 
     parser.add_argument('--loss_conv_prune_factor', default=0, type=float)
-    
-
 
     parser.add_argument('--threshold', default=1, type=float)
     parser.add_argument('--threshold_decrease', default='linear', type=str, choices = ['0', '1', '1-sinx', 'e^(-x/10)', 'linear'])
