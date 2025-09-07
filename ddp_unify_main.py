@@ -647,7 +647,7 @@ if __name__ == "__main__":
     parser.add_argument("--vit_beta", type=float, default=1.0, help="Beta coefficient for polynomial kernel")
     parser.add_argument("--vit_average_by_len", type=ast.literal_eval, default=True, help="Whether to normalize attention by sequence length")
     # LinearPositionalAttention
-    parser.add_argument("--vit_pos_type", type=str, default="absolute", choices=["absolute", "relative"])
+    parser.add_argument("--vit_pos_type", type=str, default="absolute", choices=["absolute", "rope"])
     parser.add_argument("--vit_max_len", type=int, default=2048)
     parser.add_argument("--vit_use_layernorm", type=ast.literal_eval, default=True, help="Whether to use LayerNorm in attention")
     # QuadKernelAttention
@@ -660,7 +660,7 @@ if __name__ == "__main__":
 
     # imagenet dataset arguments
     parser.add_argument('--color_jitter', type=float, default=0.4, metavar='PCT', help='Color jitter factor (default: 0.4)')
-    parser.add_argument('--aa', type=str, default='rand-m7-mstd0.5-inc1', metavar='NAME', help='Use AutoAugment policy. "v0" or "original". " + "(default: rand-m9-mstd0.5-inc1)')
+    parser.add_argument('--aa', type=str, default='rand-m9-mstd0.5-inc1', metavar='NAME', help='Use AutoAugment policy. "v0" or "original". " + "(default: rand-m9-mstd0.5-inc1)')
     parser.add_argument('--train_interpolation', type=str, default='bicubic', help='Training interpolation (random, bilinear, bicubic default: "bicubic")')
     parser.add_argument('--reprob', type=float, default=0.25, metavar='PCT', help='Random erase prob (default: 0.25)')
     parser.add_argument('--remode', type=str, default='pixel', help='Random erase mode (default: "pixel")')
