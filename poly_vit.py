@@ -47,10 +47,10 @@ class PolyKernelAttentionTimmCompat(nn.Module):
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.proj = nn.Linear(dim, dim)
-        self.attn_drop = nn.Dropout(attn_drop)
-        self.proj_drop = nn.Dropout(proj_drop)
+        self.attn_drop = nn.Dropout(attn_drop) if attn_drop > 0 else nn.Identity()
+        self.proj_drop = nn.Dropout(proj_drop) if proj_drop > 0 else nn.Identity()
 
-    def forward(self, x):
+    def forward(self, x, attn_mask=None, **kwargs):
         B, N, C = x.shape
         H, Dh = self.num_heads, self.head_dim
 
@@ -66,6 +66,14 @@ class PolyKernelAttentionTimmCompat(nn.Module):
         if self.average_by_len:
             K = K / float(N)
 
+        # optional mask support (置零被遮蔽位置)
+        if attn_mask is not None:
+            if attn_mask.dtype == torch.bool:
+                K = K * attn_mask.to(K.dtype)
+            else:
+                visible = attn_mask > -1e4
+                K = K * visible.to(K.dtype)
+
         K = self.attn_drop(K)
         y = torch.matmul(K, v)                                  # [B,H,N,Dh]
         y = y.transpose(1, 2).reshape(B, N, C)
@@ -79,7 +87,7 @@ class LinearPositionalAttention(nn.Module):
       Y = pos(Q) @ (pos(K)^T @ V) / N
     pos_type ∈ {'none','absolute','rope'}
     """
-    def __init__(self, dim, num_heads=8, bias=True, proj_drop=0.,
+    def __init__(self, dim, num_heads=8, bias=True, attn_drop=0., proj_drop=0.,
                  pos_type="absolute", max_len=2048, use_layernorm=True):
         super().__init__()
         self.num_heads = num_heads
@@ -91,7 +99,8 @@ class LinearPositionalAttention(nn.Module):
 
         self.qkv = nn.Linear(dim, dim * 3, bias=bias)
         self.proj = nn.Linear(dim, dim)
-        self.drop = nn.Dropout(proj_drop)
+        self.attn_drop = nn.Dropout(attn_drop) if attn_drop > 0 else nn.Identity()
+        self.proj_drop = nn.Dropout(proj_drop) if proj_drop > 0 else nn.Identity()
         if use_layernorm:
             self.post_norm = nn.LayerNorm(dim)
 
@@ -128,7 +137,7 @@ class LinearPositionalAttention(nn.Module):
             return apply_rope(q, cos, sin), apply_rope(k, cos, sin)
         raise RuntimeError("Unknown pos_type")
 
-    def forward(self, x):
+    def forward(self, x, attn_mask=None, **kwargs):
         B, N, C = x.shape
         H, Dh = self.num_heads, self.head_dim
 
@@ -140,13 +149,16 @@ class LinearPositionalAttention(nn.Module):
 
         q, k = self._apply_pos(q, k, N)
 
+        # 线性注意力：对中间张量 S 做 attn_drop，等价于对“权重”做丢弃
         S = torch.matmul(k.transpose(-2, -1), v)  # [B,H,Dh,Dh]
+        S = self.attn_drop(S)
+
         y = torch.matmul(q, S) / float(N)         # [B,H,N,Dh]
 
         y = y.transpose(1, 2).reshape(B, N, C)
         if self.use_layernorm:
             y = self.post_norm(y)
-        y = self.drop(self.proj(y))
+        y = self.proj_drop(self.proj(y))
         return y
 
 
@@ -157,7 +169,7 @@ class QuadKernelAttention(nn.Module):
       use_psd_square=True :  K = gamma * (beta*X + alpha)^2          (PSD)
       use_psd_square=False:  K = (a2*c2)X^2 + (a1*c1)X + (a0*c0)
     """
-    def __init__(self, dim, num_heads=8, bias=True, proj_drop=0.,
+    def __init__(self, dim, num_heads=8, bias=True, attn_drop=0., proj_drop=0.,
                  use_psd_square=True, c0=1.0, c1=1.0, c2=1.0, scale_by_len=True):
         super().__init__()
         self.num_heads = num_heads
@@ -165,7 +177,8 @@ class QuadKernelAttention(nn.Module):
         self.scale_qk = head_dim ** -0.5
         self.qkv = nn.Linear(dim, dim * 3, bias=bias)
         self.proj = nn.Linear(dim, dim)
-        self.drop = nn.Dropout(proj_drop)
+        self.attn_drop = nn.Dropout(attn_drop) if attn_drop > 0 else nn.Identity()
+        self.proj_drop = nn.Dropout(proj_drop) if proj_drop > 0 else nn.Identity()
         self.scale_by_len = scale_by_len
 
         self.use_psd_square = use_psd_square
@@ -181,7 +194,7 @@ class QuadKernelAttention(nn.Module):
             self.register_buffer("c1", torch.tensor(float(c1)))
             self.register_buffer("c2", torch.tensor(float(c2)))
 
-    def forward(self, x):
+    def forward(self, x, attn_mask=None, **kwargs):
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
         q, k, v = qkv.unbind(dim=2)
@@ -199,49 +212,20 @@ class QuadKernelAttention(nn.Module):
         if self.scale_by_len:
             K = K / float(N)
 
+        # optional mask support
+        if attn_mask is not None:
+            if attn_mask.dtype == torch.bool:
+                K = K * attn_mask.to(K.dtype)
+            else:
+                visible = attn_mask > -1e4
+                K = K * visible.to(K.dtype)
+
+        K = self.attn_drop(K)
+
         y = torch.matmul(K, v)                # [B,H,N,Dh]
         y = y.transpose(1, 2).reshape(B, N, C)
-        y = self.drop(self.proj(y))
+        y = self.proj_drop(self.proj(y))
         return y
-
-
-class SelectableAttention(nn.Module):
-    """
-    Unified interface via attn_type:
-      attn_type ∈ {'poly_kernel', 'pos_kernel', 'quad_kernel'}
-    """
-    def __init__(self, dim, num_heads=8, attn_type: str = "poly_kernel",
-                 # common
-                 bias=True, proj_drop=0.0,
-                 # PolyKernelAttentionTimmCompat
-                 degree=2, alpha=1.0, beta=1.0, average_by_len=True,
-                 # LinearPositionalAttention
-                 pos_type="absolute", max_len=2048, use_layernorm=True,
-                 # QuadKernelAttention
-                 use_psd_square=True, c0=1.0, c1=1.0, c2=1.0, scale_by_len=True):
-        super().__init__()
-        self.attn_type = attn_type
-        if attn_type == "poly_kernel":
-            self.impl = PolyKernelAttentionTimmCompat(
-                dim=dim, num_heads=num_heads, qkv_bias=bias,
-                attn_drop=proj_drop, proj_drop=proj_drop,
-                degree=degree, alpha=alpha, beta=beta, average_by_len=average_by_len
-            )
-        elif attn_type == "pos_kernel":
-            self.impl = LinearPositionalAttention(
-                dim=dim, num_heads=num_heads, bias=bias, proj_drop=proj_drop,
-                pos_type=pos_type, max_len=max_len, use_layernorm=use_layernorm
-            )
-        elif attn_type == "quad_kernel":
-            self.impl = QuadKernelAttention(
-                dim=dim, num_heads=num_heads, bias=bias, proj_drop=proj_drop,
-                use_psd_square=use_psd_square, c0=c0, c1=c1, c2=c2, scale_by_len=scale_by_len
-            )
-        else:
-            raise ValueError("attn_type must be 'poly_kernel' | 'pos_kernel' | 'quad_kernel'")
-
-    def forward(self, x):
-        return self.impl(x)
 
 
 # =========================
@@ -256,34 +240,10 @@ def _extract_timm_attn_hparams(old_attn: nn.Module):
     return dim, num_heads, attn_drop, proj_drop
 
 
-def replace_vit_with_poly_attention(model: nn.Module,
-                                    degree=2, alpha=1.0, beta=1.0,
-                                    average_by_len=True):
-    """
-    Backward-compatible helper: replace each block.attn with PolyKernelAttentionTimmCompat.
-    """
-    for blk in model.blocks:
-        old_attn = blk.attn
-        dim, num_heads, attn_drop, proj_drop = _extract_timm_attn_hparams(old_attn)
-        new_attn = PolyKernelAttentionTimmCompat(
-            dim=dim, num_heads=num_heads, qkv_bias=True,
-            attn_drop=attn_drop, proj_drop=proj_drop,
-            degree=degree, alpha=alpha, beta=beta, average_by_len=average_by_len
-        )
-        nn.init.trunc_normal_(new_attn.qkv.weight, std=0.02)
-        if new_attn.qkv.bias is not None:
-            nn.init.zeros_(new_attn.qkv.bias)
-        nn.init.trunc_normal_(new_attn.proj.weight, std=0.02)
-        if new_attn.proj.bias is not None:
-            nn.init.zeros_(new_attn.proj.bias)
-        blk.attn = new_attn
-    return model
-
-
 def replace_vit_attention(model: nn.Module,
                           attn_type: str = "poly_kernel",
                           # common
-                          bias=True, proj_drop=0.0,
+                          qkv_bias=True, attn_drop=None, proj_drop=None,
                           # PolyKernelAttentionTimmCompat
                           degree=2, alpha=1.0, beta=1.0, average_by_len=True,
                           # LinearPositionalAttention
@@ -293,29 +253,31 @@ def replace_vit_attention(model: nn.Module,
     """
     Generic replacer to swap timm ViT block.attn with a selectable attention.
       attn_type ∈ {'poly_kernel', 'pos_kernel', 'quad_kernel'}
+    - 若 attn_drop/proj_drop 传入 None，则沿用旧 attention 的 drop rate。
     """
     for blk in model.blocks:
         old_attn = blk.attn
         dim, num_heads, attn_drop_old, proj_drop_old = _extract_timm_attn_hparams(old_attn)
 
-        # prefer using the model's original drop rates unless explicitly overridden by proj_drop
-        final_proj_drop = proj_drop if proj_drop is not None else proj_drop_old
-        final_attn_drop = attn_drop_old  # used by poly kernel path (for K drop)
+        final_attn_drop = attn_drop_old if attn_drop is None else float(attn_drop)
+        final_proj_drop = proj_drop_old if proj_drop is None else float(proj_drop)
 
         if attn_type == "poly_kernel":
             new_attn = PolyKernelAttentionTimmCompat(
-                dim=dim, num_heads=num_heads, qkv_bias=bias,
+                dim=dim, num_heads=num_heads, qkv_bias=qkv_bias,
                 attn_drop=final_attn_drop, proj_drop=final_proj_drop,
                 degree=degree, alpha=alpha, beta=beta, average_by_len=average_by_len
             )
         elif attn_type == "pos_kernel":
             new_attn = LinearPositionalAttention(
-                dim=dim, num_heads=num_heads, bias=bias, proj_drop=final_proj_drop,
+                dim=dim, num_heads=num_heads, bias=qkv_bias,
+                attn_drop=final_attn_drop, proj_drop=final_proj_drop,
                 pos_type=pos_type, max_len=max_len, use_layernorm=use_layernorm
             )
         elif attn_type == "quad_kernel":
             new_attn = QuadKernelAttention(
-                dim=dim, num_heads=num_heads, bias=bias, proj_drop=final_proj_drop,
+                dim=dim, num_heads=num_heads, bias=qkv_bias,
+                attn_drop=final_attn_drop, proj_drop=final_proj_drop,
                 use_psd_square=use_psd_square, c0=c0, c1=c1, c2=c2, scale_by_len=scale_by_len
             )
         else:
@@ -334,6 +296,7 @@ def replace_vit_attention(model: nn.Module,
         blk.attn = new_attn
 
     return model
+
 
 
 class PolyNorm(nn.Module):

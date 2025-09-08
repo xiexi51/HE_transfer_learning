@@ -145,9 +145,9 @@ def process(pn, args):
 
         initialize_resnet(model)
 
-    elif args.v_type == "vit":
-        vit_name = args.vit_model
-        model = timm.create_model(vit_name, pretrained=False, num_classes=num_classes)
+    elif args.v_type == "vit": 
+        vit_name = args.vit_model 
+        model = timm.create_model(vit_name, pretrained=False, num_classes=num_classes, drop_rate=args.vit_drop_rate, attn_drop_rate=args.vit_attn_drop_rate, drop_path_rate=args.vit_drop_path_rate)
         if args.vit_attn_type != 'original':
             model = replace_vit_attention(model, attn_type=args.vit_attn_type, pos_type=args.vit_pos_type, use_psd_square=args.vit_use_psd_square, 
                                           c0=args.vit_quad_c[0], c1=args.vit_quad_c[1], c2=args.vit_quad_c[2])
@@ -638,9 +638,13 @@ if __name__ == "__main__":
     parser.add_argument('--vit_attn_type', type=str, choices=['poly_kernel', 'quad_kernel', 'pos_kernel', 'original'])
 
     # Common
+    parser.add_argument("--vit_drop_rate", type=float, default=0.1, help="Dropout rate for MLP / proj / pos / head")
+    parser.add_argument("--vit_attn_drop_rate", type=float, default=0.1, help="Dropout rate for attention weights (attn_drop)")
+    parser.add_argument("--vit_drop_path_rate", type=float, default=0.2, help="Stochastic depth (DropPath) rate")
+
     parser.add_argument("--vit_replace_modules", type=ast.literal_eval, default=True)
     parser.add_argument("--vit_bias", type=ast.literal_eval, default=True, help="Whether to use bias in attention")
-    parser.add_argument("--vit_proj_drop", type=float, default=0.0, help="Dropout rate for projection")
+
     # PolyKernelAttentionTimmCompat
     parser.add_argument("--vit_degree", type=int, default=2, help="Degree of polynomial kernel")
     parser.add_argument("--vit_alpha", type=float, default=1.0, help="Alpha coefficient for polynomial kernel")
